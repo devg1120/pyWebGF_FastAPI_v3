@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>SNMP トラフィックモニター</title>
+    <style>
+        /* 💡 bodyのパディングを0にして、ガタつきの根本原因を排除 */
+        body { font-family: sans-serif; background-color: #ffffff; color: #333333; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }
+        h5, h4 { margin-top: 0; margin-bottom: 10px; }
+        
+        /* 💡 【重要】position: fixed に変更し、上左右の余白をヘッダー内で担保することで完全に固定 */
+        .sticky-header { position: fixed; top: 0; left: 0; right: 0; background-color: #ffffff; z-index: 1000; padding: 20px 20px 10px 20px; border-bottom: 2px solid #eee; box-sizing: border-box; }
+        
+        .mode-tab { margin-bottom: 15px; padding: 10px; background-color: #f7f7f7; border: 1px solid #ddd; }
+        .mode-tab a { margin-right: 15px; text-decoration: none; font-weight: bold; color: #0066cc; }
+        .mode-tab a.active { color: #333333; pointer-events: none; border-bottom: 2px solid #333333; }
+        .filter-form { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #ccc; }
+        .form-group { display: inline-block; margin-right: 15px; margin-bottom: 10px; vertical-align: top; }
+        .form-group label { display: block; font-size: 0.85em; font-weight: bold; margin-bottom: 3px; }
+        select, input[type="date"], input[type="text"] { padding: 4px; font-size: 0.9em; }
+        .btn-submit { padding: 5px 15px; font-size: 0.9em; background-color: #4df; border: 1px solid #3bc; border-radius: 3px; cursor: pointer; font-weight: bold; }
+        .btn-submit:hover { background-color: #3cf; }
+        
+        /* 💡 固定ヘッダーが浮いている（fixed）ため、下部エリアの上部にヘッダー分の大きな余白（マージン）を設けて被りを防ぐ */
+        .container { display: flex; gap: 20px; align-items: flex-start; flex-grow: 1; margin-top: 310px; padding: 0 20px 20px 20px; box-sizing: border-box; }
+        
+        /* 💡 左サイド：目次リストも画面上部（ヘッダーのすぐ下）に追従してきれいに固定されるように配置 */
+        .sidebar { width: 280px; min-width: 280px; position: sticky; top: 310px; max-height: calc(100vh - 330px); overflow-y: auto; background: #fafafa; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
+        .main-content {  flex-grow: 1; }
+
+        .grid-1 { display: grid; grid-template-columns: 1fr; gap: 15px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .graph-card { border: 1px solid #ddd; background-color: #fafafa; padding: 8px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        .graph-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .graph-img { width: 100%; height: auto; display: block; background-color: #fff; }
+        .btn-reg { padding: 2px 6px; font-size: 0.75em; cursor: pointer; }
+    </style>
+
+
+</head>
+<body>
+
+    <!-- 💡 タイトルから絞り込み窓までをすべてこの固定ヘッダー枠に入れる -->
+    <div class="sticky-header">
+        <h5>📊 SNMP トラフィックモニター (5分間隔差分)</h5>
+
+<!-- 💡 ;異常検知ダッシュボードへの移動リンクを追加 -->
+<!--
+<div style="margin-bottom: 20px; background-color: #ffe6e6; padding: 10px; border-radius: 5px; border: 1px solid #ffb3b3;">
+    <span style="font-weight: bold; color: #b30000;">🧠 新機能：</span>
+    <a href="/anomaly_dashboard?switch={{ selected_switch }}&start_dd={{ selected_start_dd or '2026-10-01' }}&end_dd={{ selected_end_dd or '2026-10-07' }}" 
+       style="color: #b30000; font-weight: bold; text-decoration: underline;">
+        Merlion 異常検知トラフィックモニター画面へ移動する →
+    </a>
+</div>
+-->
+        
+        <div style="margin-bottom: 15px;">
+            <a href="/dashboard" style="text-decoration: none; font-weight: bold; color: #0066cc;">📊 登録済みのダッシュボードを見る</a>
+    <a href="/anomaly_dashboard?switch={{ selected_switch }}&start_dd={{ selected_start_dd or '' }}&end_dd={{ selected_end_dd or '' }}" 
+       style="color: #b30000; font-weight: bold; text-decoration: underline;">
+        Merlion 異常検知トラフィックモニター画面へ移動する →
+    </a>
+    <a href="/anomaly_dashboard?switch={{ selected_switch }}&start_dd={{ selected_start_dd or '2026-06-01' }}&end_dd={{ selected_end_dd or '2026-06-01' }}" 
+       style="color: green; font-weight: bold; text-decoration: underline;">
+         モニター2026-06-01 →
+    </a>
+        </div>
+
+        <!-- モード切り替えタブ -->
+        <div class="mode-tab">
+            <a href="/?mode=single&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&switch={{ selected_switch }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}" {% if current_mode == 'single' %}class="active"{% endif %}>[-] single 通常モード（日を選択）</a>
+	    <!--
+            <a href="/?mode=range&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&switch={{ selected_switch }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&start_dd={{ selected_start_dd or '2026-06-01' }}&end_dd={{ selected_end_dd or '2026-06-01' }}" {% if current_mode == 'range' %}class="active"{% endif %}>[-] range 期間指定モード</a>
+-->
+            <a href="/?mode=range&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&switch={{ selected_switch }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&start_dd={{ selected_start_dd or yesterday }}&end_dd={{ selected_end_dd or today }}" {% if current_mode == 'range' %}class="active"{% endif %}>[-] range 期間指定モード</a>
+        </div>
+
+        <!-- 条件指定フォーム -->
+        <form method="GET" action="/" class="filter-form">
+            <input type="hidden" name="mode" value="{{ current_mode }}">
+            <!-- ...（中身のフォームグループは既存のままで変更なし）... -->
+            {% if current_mode == 'single' %}
+
+            <div class="form-group">
+                <label>対象月</label>
+  <select id="select_yyyymm" name="yyyymm">
+    {% for yyyymm in date_tree.keys() %}
+      <option value="{{ yyyymm }}" {% if yyyymm == selected_yyyymm %}selected{% endif %}>
+        {{ yyyymm[:4] }}年{{ yyyymm[4:] }}月
+      </option>
+    {% endfor %}
+  </select>
+            </div>
+            <div class="form-group">
+                <label>対象日</label>
+  <select id="select_dd" name="dd">
+    {% for dd in available_dds %}
+      <option value="{{ dd }}" {% if dd == selected_dd %}selected{% endif %}>
+        {{ dd }}日
+      </option>
+    {% endfor %}
+  </select>
+            </div>
+            {% else %}
+            <div class="form-group">
+                <label>開始日</label>
+                <input type="date" name="start_dd" value="{{ selected_start_dd or yesterday}}">
+            </div>
+            <div class="form-group">
+                <label>終了日</label>
+                <input type="date" name="end_dd" value="{{ selected_end_dd or today }}">
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <label>対象スイッチ</label>
+                <select name="switch" onchange="this.form.submit()">
+                    {% for sw in switches %}
+                    <option value="{{ sw }}" {% if sw == selected_switch %}selected{% endif %}>{{ sw }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if current_mode == 'single' %}
+            <div class="form-group">
+                <label>開始（時）</label>
+                <select name="start_hour">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }} 時</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>終了（時）</label>
+                <select name="end_hour">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }} 時</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <label>グラフ列数</label>
+                <select name="cols">
+                    <option value="1" {% if selected_cols == 1 %}selected{% endif %}>1 列表示</option>
+                    <option value="2" {% if selected_cols == 2 %}selected{% endif %}>2 列表示 (標準)</option>
+                    <option value="4" {% if selected_cols == 4 %}selected{% endif %}>4 列並び</option>
+                </select>
+            </div>
+            <div class="form-group" style="padding-top: 18px;">
+<button type="button" id="btn_update_submit">
+  {% if current_mode == 'single' %}条件を更新{% else %}グラフを表示・更新{% endif %}
+</button>
+            </div>
+        </form>
+
+        <!-- リアルタイム絞り込み入力欄 -->
+        {% if csv_filenames %}
+        <div style="background-color: #eef; padding: 10px; border-radius: 4px; font-size: 0.9em; border: 1px solid #ccd; display: flex; align-items: center; gap: 15px;">
+            <div>
+                🔍 グラフを絞り込み: <input type="text" id="filter-input" placeholder="インターフェース名や説明を入力..." style="width: 250px; padding: 4px;">
+            </div>
+            <div id="filter-status" style="font-weight: bold; color: #555;">
+                表示中: {{ csv_filenames|length }} / {{ csv_filenames|length }} 件
+            </div>
+        </div>
+        {% endif %}
+    </div> <!-- 💡 ここで固定ヘッダー枠（.sticky-header）を閉じます -->
+
+    <div class="container">
+        {% if csv_filenames %}
+        <!-- 💡 左サイド：グラフ目次エリア -->
+        <div class="sidebar">
+            <h4 style="margin-top: 0;">📋 グラフ目次</h4>
+            <ul id="sidebar-menu" style="font-size: 0.85em; line-height: 1.6; padding-left: 15px; margin: 0; list-style-type: square;">
+            {% for filename in csv_filenames %}
+                {% set ns = namespace() %}
+                {% set ns.interface = filename | replace('.csv','') %}
+                {% set ns.desc = "" %}
+                {% if ns.interface in info_dic %}
+                    {% set ns.desc = info_dic[ns.interface].desc %}
+                {% endif %}
+                <li class="menu-item" data-search="{{ ns.interface | lower }} {{ ns.desc | lower }}">
+                    <a href="#graph-{{ ns.interface }}" style="color: #0066cc; text-decoration: none;">{{ ns.interface }} <span style="color: #666; font-size: 0.9em;">{{ ns.desc }}</span></a>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- 💡 右メイン：グラフ描画エリア -->
+        <div class="main-content">
+            {% if csv_filenames %}
+            <div class="{% if selected_cols == 1 %}grid-1{% elif selected_cols == 4 %}grid-4{% else %}grid-2{% endif %}" id="graph-grid">
+                {% for filename in csv_filenames %}
+                    {% set ns = namespace(is_registered=false) %}
+                    {% set ns.interface = filename | replace('.csv','') %}
+                    {% set ns.desc = "" %}
+                    
+                    {% if ns.interface in info_dic %}
+                        {% set ns.desc = info_dic[ns.interface].desc %}
+                        {% set ns.speed = info_dic[ns.interface].speed %}
+                    {% endif %}
+                    
+                    {% for item in registry %}
+                        {% if item.yyyymm == selected_yyyymm and item.dd == selected_dd and item.switch == selected_switch and item.filename == filename %}
+                            {% set ns.is_registered = true %}
+                        {% endif %}
+                    {% endfor %}
+
+                    <div class="graph-card" id="graph-{{ ns.interface }}" data-search="{{ ns.interface | lower }} {{ ns.desc | lower }}">
+                        <div class="graph-header">
+                            <span style="font-weight: bold; font-size: 0.9em;">{{ ns.interface }} 
+                                 {% if ns.speed %}
+                                      <span style="color: #000; font-weight: normal; margin-left: 10px;">{{ ns.speed | int // 1000 }}Gbps</span>
+                                 {% endif %}
+                                 {% if ns.desc %}
+                                      <span style="color: #555; font-weight: normal; margin-left: 20px;">{{ ns.desc }}</span>
+                                 {% endif %}
+                            </span>
+                            
+<!-- 💡 onsubmitを追加して、JavaScriptで非同期送信にインターセプト（横取り）します -->
+<form method="POST" action="/dashboard/add" style="margin: 0;" onsubmit="registerDashboard(event, this)">
+    <input type="hidden" name="yyyymm" value="{{ selected_yyyymm }}">
+    <input type="hidden" name="dd" value="{{ selected_dd }}">
+    <input type="hidden" name="switch" value="{{ selected_switch }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="desc" value="{{ ns.desc }}">
+    
+    {% if ns.is_registered %}
+    <button type="button" class="btn-reg" style="background-color: #0080ff; color: #ffffff; border: 1px solid #0080ff;" disabled>登録中</button>
+    {% else %}
+    <button type="submit" class="btn-reg btn-reg-submit" style="background-color: #e1f5fe; border: 1px solid #b3e5fc; color: #0288d1;">＋ ダッシュボード登録</button>
+    {% endif %}
+</form>
+
+                        </div>
+<img class="graph-img monitor-chart" 
+             data-switch="{{ selected_switch }}" 
+             data-filename="{{ filename }}" 
+             data-desc="{{ ns.desc }}"
+
+
+     src="/plot?mode={{ current_mode }}&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}&switch={{ selected_switch }}&filename={{ filename }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ ns.desc | urlencode }}&speed={{ ns.speed}}" 
+     alt="読み込み中..." 
+     loading="lazy"
+     width="800"
+     height="300"
+     style="aspect-ratio: 800 / 300; width: 100%; height: auto; background-color: #fdfdfd;">
+
+
+                    </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="padding: 20px; background-color: #fff3f3; border: 1px solid #ffcdd2; color: #c62828; border-radius: 4px;">
+                選択された条件（{{ selected_yyyymm }}/{{ selected_dd }} - {{ selected_switch or 'スイッチなし' }}）のディレクトリ内にCSVファイルが見つかりません。
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <!-- 💡 アスタリスクワイルドカード対応のリアルタイム絞り込みスクリプト -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterInput = document.getElementById('filter-input');
+            if (!filterInput) return;
+
+            const graphCards = document.querySelectorAll('.graph-card');
+            const menuItems = document.querySelectorAll('.menu-item');
+            const filterStatus = document.getElementById('filter-status');
+            const totalCount = graphCards.length;
+
+            filterInput.addEventListener('input', function() {
+                const rawQuery = this.value.toLowerCase().trim();
+                let visibleCount = 0;
+
+                if (rawQuery === "") {
+                    // 検索ワードが空なら全表示
+                    graphCards.forEach(card => card.style.display = '');
+                    menuItems.forEach(item => item.style.display = '');
+                    filterStatus.textContent = `表示中: ${totalCount} / ${totalCount} 件`;
+                    return;
+                }
+
+                // 💡 ユーザーの入力からアスタリスクを正規表現のワイルドカード(.*)に変換する
+                // エスケープ処理を挟みつつ、"*" を ".*" に置き換えます
+                const escapedQuery = rawQuery.replace(/[-\/\\^\$+.()|[\]{}]/g, '\\$&');
+                const regexStr = escapedQuery.replace(/\*/g, '.*');
+                
+                try {
+                    const regex = new RegExp(regexStr);
+
+                    // グラフカードのフィルタリング
+                    graphCards.forEach(card => {
+                        const searchSpace = card.getAttribute('data-search');
+                        if (regex.test(searchSpace)) {
+                            card.style.display = '';
+                            visibleCount++;
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+
+                    // サイドバー目次のフィルタリング
+                    menuItems.forEach(item => {
+                        const searchSpace = item.getAttribute('data-search');
+                        if (regex.test(searchSpace)) {
+                            item.style.display = '';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+
+                    // 件数ステータスの更新
+                    filterStatus.textContent = `表示中: ${visibleCount} / ${totalCount} 件`;
+
+                } catch (e) {
+                    // 入力途中で不正な正規表現になった場合のフォールバック（エラーで画面を止めない）
+                    console.log("検索クエリのパースをスキップ中...");
+                }
+            });
+        });
+    </script>
+
+    <script>
+        // 💡 【新設】ページをリロードさせずに裏でダッシュボード登録を行う関数
+        function registerDashboard(event, formElement) {
+            // 1. 通常のフォーム送信（ページリロード）を絶対にキャンセルする
+            event.preventDefault();
+
+            // 2. フォーム内のデータをJavaScriptで収集
+            const formData = new FormData(formElement);
+
+            // 3. fetch APIを使って、裏でこっそりサーバーの「/dashboard/add」を叩く
+            fetch(formElement.action, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 4. サーバー側の登録が成功したら、押されたボタンの見た目を「登録中」に書き換える
+                    const submitBtn = formElement.querySelector('.btn-reg-submit');
+                    if (submitBtn) {
+                        submitBtn.type = 'button';
+                        submitBtn.disabled = true;
+                        submitBtn.style.backgroundColor = '#0080ff';
+                        submitBtn.style.borderColor = '#0080ff';
+                        submitBtn.style.color = '#ffffff';
+                        submitBtn.textContent = '登録中';
+                    }
+                } else {
+                    alert('ダッシュボードへの登録に失敗しました。');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('通信エラーが発生しました。');
+            });
+        }
+    </script>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    // 💡 画面をトップにスクロールさせず、中身だけを非同期で部分更新する関数
+    async function refreshPageContainer(event) {
+        if (event) {
+            event.preventDefault(); // フォーム送信による画面リロード（トップ移動）を完全に阻止
+            event.stopPropagation();
+        }
+
+        // 1. 現在のスクロール位置（一番上からのピクセル数）を正確に記憶
+        const currentScrollY = window.scrollY || window.pageYOffset;
+
+        // 2. 現在選択されているフォームの入力値（日付やスイッチなど）をすべて集計
+        const form = document.querySelector('form') || document.getElementById('select_yyyymm')?.form;
+        if (!form) return;
+
+        const formData = new FormData(form);
+        const params = new URLSearchParams();
+        for (const [key, value] of formData.entries()) {
+            params.append(key, value);
+        }
+
+        // 現在のモード（singleなど）も安全に付与
+        if (!params.has('mode')) {
+            params.append('mode', "{{ current_mode }}");
+        }
+
+        try {
+            // 3. バックエンド（FastAPI）に対して、裏側で静かに新しい日付のデータをリクエスト
+            const targetUrl = `/?${params.toString()}`;
+            const response = await fetch(targetUrl);
+            if (!response.ok) throw new Error('ネットワークエラーが発生しました');
+            
+            const htmlText = await response.text();
+
+            // 4. 取得した新しいHTMLから、コンテンツ部分だけを抽出して現在の画面に上書き
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(htmlText, 'text/html');
+            
+            // 画面全体を囲む適切な要素（なければ body 内）を差し替えます
+            // ここでは最も安全に body の中身を丸ごとスムーズに入れ替えます
+            document.body.innerHTML = newDoc.body.innerHTML;
+
+            // 5. 💡 【最重要】要素が置き換わった瞬間に、記憶していたスクロール位置へ強制固定
+            window.scrollTo(0, currentScrollY);
+            
+            // ブラウザのレンダリングラグ対策として複数回固定をかける
+            requestAnimationFrame(() => {
+                window.scrollTo(0, currentScrollY);
+            });
+            
+            // 6. 差し替えた後の新しい要素に対しても、再度このJavaScriptイベントを紐付け直す（再帰）
+            rebindEvents();
+
+        } catch (error) {
+            console.error("[エラー] グラフの非同期更新に失敗しました:", error);
+            // 万が一エラーが起きた場合は、通常の画面リロードに安全にフォールバック
+            form.submit();
+        }
+    }
+
+    // 各イベントに割当を行う補助関数
+    function rebindEvents() {
+        const monthSelect = document.querySelector('select[name="yyyymm"]');
+        const daySelect = document.querySelector('select[name="dd"]');
+        const updateBtn = document.getElementById('btn_update_submit') || document.querySelector('button[type="submit"]');
+
+        // 既存のオンチェンジイベントによるリロードを無効化し、部分更新関数をセット
+        if (monthSelect) {
+            monthSelect.onchange = null;
+            monthSelect.addEventListener('change', refreshPageContainer);
+        }
+        if (daySelect) {
+            daySelect.onchange = null;
+            daySelect.addEventListener('change', refreshPageContainer);
+        }
+        if (updateBtn) {
+            updateBtn.addEventListener('click', refreshPageContainer);
+        }
+    }
+
+    // 初回起動時のバインド実行
+    rebindEvents();
+});
+</script>
+
+
+
+</body>
+</html>

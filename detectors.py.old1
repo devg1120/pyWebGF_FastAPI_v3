@@ -1,0 +1,64 @@
+import pandas as pd
+import numpy as np
+
+class AnomalyDetectors:
+    """異常検知アルゴリズムを管理するクラス"""
+
+    @classmethod
+    def get_available_logics(cls) -> dict:
+        """
+        利用可能な検知ロジックの一覧と画面表示名を定義する辞書
+        新しいロジックを追加した場合は、ここに1行追記するだけで画面と自動連動します。
+        """
+        return {
+            "stat_threshold": "【異常検知: 直近急変重視】",
+            "burst_detector": "【異常検知: 30分連続バースト重視】",
+            "z_score_outlier": "【異常検知: 総合外れ値】",
+            # "new_logic": "【異常検知: 新しいロジックの表示名】", # 👈 将来ここに増やすだけ！
+        }
+
+    @classmethod
+    def detect(cls, logic_name: str, df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
+        """
+        指定されたロジック名に基づいて異常検知を計算し、異常行（anomalies）のDataFrameを返す
+        """
+        # 指定されたロジックのメソッドを動的に取得。存在しない場合は一律で空を返す安全ガード
+        method = getattr(cls, f"_{logic_name}", None)
+        if method is None:
+            return pd.DataFrame()
+        
+        return method(df, percentile_val)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 各異常検知アルゴリズムの実装（プライベートメソッド群）
+    # ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _stat_threshold(df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
+        """直近急変重視モデル"""
+        df_cp = df.copy()
+        df_cp["diff_val"] = df_cp["bps_A"].diff().abs().fillna(0)
+        threshold = df_cp["diff_val"].quantile(percentile_val)
+        return df_cp[(df_cp["diff_val"] >= threshold) & (df_cp["diff_val"] > 10_000_000)]
+
+    @staticmethod
+    def _burst_detector(df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
+        """30分連続バースト重視モデル"""
+        df_cp = df.copy()
+        df_cp["rolling_mean"] = df_cp["bps_A"].rolling(window=6, min_periods=1).mean()
+        df_cp["next_bps"] = df_cp["bps_A"].shift(-1).fillna(df_cp["bps_A"])
+        threshold = df_cp["rolling_mean"].quantile(percentile_val)
+        return df_cp[
+            (df_cp["rolling_mean"] >= threshold) &
+            (df_cp["bps_A"] > 15_000_000) &
+            (df_cp["next_bps"] > 15_000_000)
+        ]
+
+    @staticmethod
+    def _z_score_outlier(df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
+        """総合外れ値モデル"""
+        df_cp = df.copy()
+        mean_bps = df_cp["bps_A"].mean()
+        std_bps = df_cp["bps_A"].std()
+        df_cp["z_score"] = (df_cp["bps_A"] - mean_bps) / std_bps if std_bps > 0 else 0
+        return df_cp[(df_cp["z_score"] > 2.55) & (df_cp["bps_A"] > 20_000_000)]

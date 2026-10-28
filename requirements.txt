@@ -1,0 +1,9 @@
+fastapi
+matplotlib
+natsort
+numpy
+pandas
+uvicorn
+jinja2
+python-multipart
+

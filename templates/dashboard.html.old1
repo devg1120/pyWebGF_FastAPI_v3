@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>登録済みダッシュボード - SNMP トラフィックモニター</title>
+    <style>
+        /* メイン画面と完全に統一したガタつきのない固定レイアウトスタイル */
+        body { font-family: sans-serif; background-color: #ffffff; color: #333333; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }
+        h5, h4 { margin-top: 0; margin-bottom: 10px; }
+        
+        /* ヘッダーエリア全体の完全固定配置ルール */
+        .sticky-header { position: fixed; top: 0; left: 0; right: 0; background-color: #ffffff; z-index: 1000; padding: 20px 20px 10px 20px; border-bottom: 2px solid #eee; box-sizing: border-box; }
+        
+        .mode-tab { margin-bottom: 15px; padding: 10px; background-color: #f7f7f7; border: 1px solid #ddd; }
+        .mode-tab a { margin-right: 15px; text-decoration: none; font-weight: bold; color: #0066cc; }
+        .mode-tab a.active { color: #333333; pointer-events: none; border-bottom: 2px solid #333333; }
+        .filter-form { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #ccc; }
+        .form-group { display: inline-block; margin-right: 15px; margin-bottom: 10px; vertical-align: top; }
+        .form-group label { display: block; font-size: 0.85em; font-weight: bold; margin-bottom: 3px; }
+        select, input[type="date"], input[type="text"] { padding: 4px; font-size: 0.9em; }
+        .btn-submit { padding: 5px 15px; font-size: 0.9em; background-color: #4df; border: 1px solid #3bc; border-radius: 3px; cursor: pointer; font-weight: bold; }
+        .btn-submit:hover { background-color: #3cf; }
+        
+        /* 下部メインエリアのスクロール構造と被り防止マージン */
+        .container { display: flex; gap: 20px; align-items: flex-start; flex-grow: 1; margin-top: 310px; padding: 0 20px 20px 20px; box-sizing: border-box; }
+        
+        /* 左サイド：目次リスト固定位置 */
+        .sidebar { width: 280px; min-width: 280px; position: sticky; top: 310px; max-height: calc(100vh - 330px); overflow-y: auto; background: #fafafa; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
+        .main-content { flex-grow: 1; }
+
+        .grid-1 { display: grid; grid-template-columns: 1fr; gap: 15px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .graph-card { border: 1px solid #ddd; background-color: #fafafa; padding: 8px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        .graph-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .graph-img { width: 100%; height: auto; display: block; background-color: #fff; }
+        .btn-del { padding: 2px 6px; font-size: 0.75em; cursor: pointer; background-color: #ffebee; border: 1px solid #ffcdd2; color: #c62828; }
+        .btn-del:hover { background-color: #ffcdd2; }
+    </style>
+</head>
+<body>
+
+    <div class="sticky-header">
+        <h5>📋 登録済みカスタムダッシュボード</h5>
+        
+        <div style="margin-bottom: 15px;">
+            <a href="/?mode={{ current_mode }}&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}" style="text-decoration: none; font-weight: bold; color: #0066cc;">🔙 メインモニター画面に戻る</a>
+        </div>
+
+        <!-- 💡 モード切り替えタブ（ダッシュボード側の一括切り替えリンク） -->
+        <div class="mode-tab">
+            <a href="/dashboard?mode=single&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}" {% if current_mode == 'single' %}class="active"{% endif %}>[-] single 通常モード（日を一括変更）</a>
+            <a href="/dashboard?mode=range&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&start_dd={{ selected_start_dd or '2026-06-01' }}&end_dd={{ selected_end_dd or '2026-06-01' }}" {% if current_mode == 'range' %}class="active"{% endif %}>[-] range 期間指定モード（期間を一括変更）</a>
+        </div>
+
+        <!-- 条件指定フォーム -->
+        <form method="GET" action="/dashboard" class="filter-form">
+            <input type="hidden" name="mode" value="{{ current_mode }}">
+
+            {% if current_mode == 'single' %}
+            <div class="form-group">
+                <label>一括変更：対象月</label>
+                <select name="yyyymm" onchange="this.form.submit()">
+                    {% for yyyymm in date_tree.keys() %}
+                    <option value="{{ yyyymm }}" {% if yyyymm == selected_yyyymm %}selected{% endif %}>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>一括変更：対象日</label>
+                <select name="dd" onchange="this.form.submit()">
+                    {% for dd in available_dds %}
+                    <option value="{{ dd }}" {% if dd == selected_dd %}selected{% endif %}>{{ dd }}日</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% else %}
+            <div class="form-group">
+                <label>一括変更：開始日</label>
+                <input type="date" name="start_dd" value="{{ selected_start_dd or '2026-06-01' }}">
+            </div>
+            <div class="form-group">
+                <label>一括変更：終了日</label>
+                <input type="date" name="end_dd" value="{{ selected_end_dd or '2026-06-01' }}">
+            </div>
+            {% endif %}
+
+            <div class="form-group">
+                <label>表示時間：開始</label>
+                <select name="start_hour">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }} 時</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>表示時間：終了</label>
+                <select name="end_hour">
+                    {% for h in range(0, 24) %}
+                    <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }} 時</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>グラフ列数</label>
+                <select name="cols">
+                    <option value="1" {% if selected_cols == 1 %}selected{% endif %}>1 列表示</option>
+                    <option value="2" {% if selected_cols == 2 %}selected{% endif %}>2 列表示 (標準)</option>
+                    <option value="4" {% if selected_cols == 4 %}selected{% endif %}>4 列並び</option>
+                </select>
+            </div>
+
+            <div class="form-group" style="padding-top: 18px;">
+                <button type="submit" class="btn-submit">ダッシュボード設定を更新</button>
+            </div>
+        </form>
+
+        <!-- 💡 リアルタイム絞り込み入力欄 -->
+        {% if registry %}
+        <div style="background-color: #eef; padding: 10px; border-radius: 4px; font-size: 0.9em; border: 1px solid #ccd; display: flex; align-items: center; gap: 15px;">
+            <div>
+                🔍 登録グラフを絞り込み: <input type="text" id="filter-input" placeholder="スイッチ、I/F名、説明で絞り込み..." style="width: 250px; padding: 4px;">
+            </div>
+            <div id="filter-status" style="font-weight: bold; color: #555;">
+                表示中: {{ registry|length }} / {{ registry|length }} 件
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+
+    <div class="container">
+        {% if registry %}
+        <!-- 💡 左サイド：登録済みグラフの目次エリア -->
+        <div class="sidebar">
+            <h4 style="margin-top: 0;">📋 ダッシュボード目次</h4>
+            <ul id="sidebar-menu" style="font-size: 0.85em; line-height: 1.6; padding-left: 15px; margin: 0; list-style-type: square;">
+            {% for item in registry %}
+                {% set ns_if = item.filename | replace('.csv','') %}
+                <!-- 💡 id="dash-menu-{{ loop.index0 }}" を追加 -->
+                <li class="menu-item" id="dash-menu-{{ loop.index0 }}" data-search="{{ (item.switch ~ ' ' ~ ns_if ~ ' ' ~ item.desc) | lower }}">
+                    <a href="#dash-{{ loop.index0 }}" style="color: #0066cc; text-decoration: none;">
+                        <small>[{{ item.switch }}]</small> {{ ns_if }} 
+                        <span style="color: #666; font-size: 0.9em;">{{ item.desc }}</span>
+                    </a>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- 💡 右メイン：ダッシュボードグラフ描画エリア -->
+        <div class="main-content">
+            {% if registry %}
+            <div class="{% if selected_cols == 1 %}grid-1{% elif selected_cols == 4 %}grid-4{% else %}grid-2{% endif %}" id="graph-grid">
+                {% for item in registry %}
+                    {% set ns_if = item.filename | replace('.csv','') %}
+                    
+                    <!-- 💡 idを dash-card-{{ loop.index0 }} に変更 -->
+                    <div class="graph-card" id="dash-card-{{ loop.index0 }}" data-search="{{ (item.switch ~ ' ' ~ ns_if ~ ' ' ~ item.desc | urldecode) | lower }}">
+                        <div class="graph-header">
+                            <span style="font-weight: bold; font-size: 0.9em;">
+                                <span style="color: #0288d1;">[{{ item.switch }}]</span> # {{ ns_if }} 
+                                {% if item.desc %}<span style="color: #555; font-weight: normal; margin-left: 5px;">({{ item.desc }})</span>{% endif %}
+                            </span>
+                            
+                            <!-- 💡 onsubmit を変更して JavaScript の非同期削除関数を呼び出す -->
+                            <form method="POST" action="/dashboard/delete" style="margin: 0;" onsubmit="deleteDashboard(event, this, {{ loop.index0 }})">
+                                <input type="hidden" name="index" value="{{ loop.index0 }}">
+                                <button type="submit" class="btn-del">× 削除</button>
+                            </form>
+                        </div>
+                        
+                        <img class="graph-img" 
+                             src="/plot?item.base_id or 'default' }}&mode={{ current_mode }}&yyyymm={% if current_mode == 'single' %}{{ selected_yyyymm }}{% else %}{{ item.yyyymm }}{% endif %}&dd={% if current_mode == 'single' %}{{ selected_dd }}{% else %}{{ item.dd }}{% endif %}&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}&switch={{ item.switch }}&filename={{ item.filename }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ item.desc| urlencode }}" 
+                             alt="グラフ読み込み中..." 
+                             loading="lazy"
+                             width="800"
+                             height="300"
+                             style="aspect-ratio: 800 / 300; width: 100%; height: auto; background-color: #fdfdfd;">
+                    </div>
+                {% endfor %}
+            </div>
+
+            {% else %}
+            <div style="padding: 25px; background-color: #f9f9f9; border: 1px solid #ddd; color: #555; border-radius: 4px; text-align: center;">
+                <h4>📌 ダッシュボードにはまだ何も登録されていません。</h4>
+                <p style="font-size: 0.9em; margin-bottom: 0;">メインモニター画面の各グラフ右上にある「＋ ダッシュボード登録」ボタンを押すと、お気に入りのグラフをここに並べることができます。</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 💡 アスタリスクワイルドカード対応のダッシュボード用リアルタイム絞り込みスクリプト -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterInput = document.getElementById('filter-input');
+            if (!filterInput) return;
+
+            const graphCards = document.querySelectorAll('.graph-card');
+            const menuItems = document.querySelectorAll('.menu-item');
+            const filterStatus = document.getElementById('filter-status');
+            const totalCount = graphCards.length;
+
+            filterInput.addEventListener('input', function() {
+                const rawQuery = this.value.toLowerCase().trim();
+                let visibleCount = 0;
+
+                if (rawQuery === "") {
+                    graphCards.forEach(card => card.style.display = '');
+                    menuItems.forEach(item => item.style.display = '');
+                    filterStatus.textContent = `表示中: ${totalCount} / ${totalCount} 件`;
+                    return;
+                }
+
+                // ユーザー入力のエスケープとアスタリスクのワイルドカード置換処理
+                const escapedQuery = rawQuery.replace(/[-\/\\^\$+.()|[\]{}]/g, '\\$&');
+                const regexStr = escapedQuery.replace(/\*/g, '.*');
+                
+                try {
+                    const regex = new RegExp(regexStr);
+
+                    // グラフカードのフィルタリング
+                    graphCards.forEach(card => {
+                        const searchSpace = card.getAttribute('data-search');
+                        if (regex.test(searchSpace)) {
+                            card.style.display = '';
+                            visibleCount++;
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+
+                    // サイドバー目次のフィルタリング
+                    menuItems.forEach(item => {
+                        const searchSpace = item.getAttribute('data-search');
+                        if (regex.test(searchSpace)) {
+                            item.style.display = '';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+
+                    // 件数ステータスの更新
+                    filterStatus.textContent = `表示中: ${visibleCount} / ${totalCount} 件`;
+
+                } catch (e) {
+                    console.log("検索クエリのパースをスキップ中...");
+                }
+            });
+        });
+    </script>
+    <script>
+        // 💡 【新設】ページをリロードさせずに裏でダッシュボード削除を行う関数
+        function deleteDashboard(event, formElement, index) {
+            // 1. 通常のフォーム送信（ページリロード）をキャンセル
+            event.preventDefault();
+
+            // 2. ユーザー確認
+            if (!confirm('このグラフをダッシュボードから削除しますか？')) {
+                return;
+            }
+
+            // 3. フォーム内のデータを収集
+            const formData = new FormData(formElement);
+
+            // 4. fetch APIを使って、裏でサーバーの「/dashboard/delete」を叩く
+            fetch(formElement.action, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 5. サーバー側の削除が成功したら、対象のグラフカードとサイドバーの目次をふわっと消す
+                    const targetCard = document.getElementById(`dash-card-${index}`);
+                    const targetMenu = document.getElementById(`dash-menu-${index}`);
+                    
+                    if (targetCard) {
+                        targetCard.style.transition = 'all 0.3s ease';
+                        targetCard.style.opacity = '0';
+                        targetCard.style.transform = 'scale(0.9)';
+                        setTimeout(() => {
+                            targetCard.remove();
+                            // 残り件数を再計算してステータスを更新
+                            updateFilterStatus();
+                        }, 300);
+                    }
+                    
+                    if (targetMenu) {
+                        targetMenu.remove();
+                    }
+                } else {
+                    alert('ダッシュボードからの削除に失敗しました。');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('通信エラーが発生しました。');
+            });
+        }
+
+        // 💡 表示件数のカウンターを更新する補助関数
+        function updateFilterStatus() {
+            const filterInput = document.getElementById('filter-input');
+            const graphCards = document.querySelectorAll('.graph-card');
+            const filterStatus = document.getElementById('filter-status');
+            if (!filterStatus) return;
+
+            let visibleCount = 0;
+            graphCards.forEach(card => {
+                if (card.style.display !== 'none') visibleCount++;
+            });
+            filterStatus.textContent = `表示中: ${visibleCount} / ${graphCards.length} 件`;
+
+            // 万が一すべて削除されて空になったらメッセージを表示
+            if (graphCards.length === 0) {
+                const mainContent = document.querySelector('.main-content');
+                const sidebar = document.querySelector('.sidebar');
+                if (sidebar) sidebar.remove();
+                if (mainContent) {
+                    mainContent.innerHTML = `
+                        <div style="padding: 25px; background-color: #f9f9f9; border: 1px solid #ddd; color: #555; border-radius: 4px; text-align: center;">
+                            <h4>📌 ダッシュボードにはまだ何も登録されていません。</h4>
+                        </div>`;
+                }
+                const filterArea = document.getElementById('filter-input')?.closest('div[style*="background-color: #eef"]');
+                if (filterArea) filterArea.remove();
+            }
+        }
+    </script>
+
+</body>
+</html>

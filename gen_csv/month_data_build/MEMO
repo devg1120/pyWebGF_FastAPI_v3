@@ -1,0 +1,10 @@
+python gen_csv5.py
+
+
+   # ─── ❌ 修正前（int32に丸め込まれてオーバーフローのバグを誘発していた） ───
+   # bytes_in = np.clip(bytes_in, 0, 125_000_000).astype(int)
+   # bytes_out = np.clip(bytes_out, 0, 125_000_000).astype(int)
+
+   # ─── 💡 修正後（int64 または float64 を明示して、21億の桁あふれを完璧に防御する） ───
+   bytes_in = np.clip(bytes_in, 0, 125_000_000).astype(np.int64)
+   bytes_out = np.clip(bytes_out, 0, 125_000_000).astype(np.int64)

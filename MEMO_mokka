@@ -1,0 +1,19 @@
+
+pip3.10 install fastapi uvicorn jinja2 python-multipart pandas matplotlib natsort
+
+# Merlion 関連のインポート
+
+# powershell
+
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+pip3.10 install salesforce-merlion
+
+または
+
+pip3.10 install "salesforce-merlion[anomaly]"
+
+
+
+
+

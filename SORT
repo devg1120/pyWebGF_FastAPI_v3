@@ -1,0 +1,47 @@
+from natsort import natsorted
+
+data = ["s1", "s2", "s3", "s4", "s5", "s6", "s10"]
+
+# 自然順でソート
+result = natsorted(data)
+
+print(result)
+# 出力: ['s1', 's2', 's3', 's4', 's5', 's6', 's10']
+
+
+
+--------------------------------------------------------
+
+import re
+
+data = ["s1", "s2", "s3", "s4", "s5", "s6", "s10"]
+
+# 文字列を「文字部分」と「数字部分」に分解し、数字は数値（int）に変換する関数
+def natural_sort_key(text):
+    return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', text)]
+
+# keyに作成した関数を指定してソート
+data.sort(key=natural_sort_key)
+
+print(data)
+# 出力: ['s1', 's2', 's3', 's4', 's5', 's6', 's10']
+
+
+-----------------------------------------------------------
+
+from natsort import natsorted
+
+interfaces = [
+    "GigabitEthernet0/0/1",
+    "GigabitEthernet0/0/10",
+    "GigabitEthernet0/0/2"
+]
+
+# 自然順でソート
+result = natsorted(interfaces)
+print(result)
+# 出力: ['GigabitEthernet0/0/1', 'GigabitEthernet0/0/2', 'GigabitEthernet0/0/10']
+
+------------------------------------------------------------
+
+

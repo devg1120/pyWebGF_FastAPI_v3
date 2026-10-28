@@ -1,0 +1,27 @@
+
+
+
+pip install fastapi uvicorn jinja2 python-multipart pandas matplotlib natsort
+pip install --upgrade fastapi starlette jinja2
+
+# Merlion 対応中止
+
+# powershell
+
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+pip install salesforce-merlion
+
+または
+
+pip install "salesforce-merlion[anomaly]"
+
+
+
+
+python3.10 main.py
+
+sudo yum install -y vlgothic-fonts ipa-gothic-fonts ipa-pgothic-fonts
+rm -rf ~/.cache/matplotlib
+
+

@@ -1,0 +1,78 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Merlion 異常検知ダッシュボード</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; margin: 30px; color: #333; }
+        .header-area { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 2px solid #d9534f; padding-bottom: 10px; }
+        .search-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 25px; }
+        .graph-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border: 1px solid #e1e1e8; }
+        .graph-card img { max-width: 100%; height: auto; border-radius: 4px; }
+        label { margin-right: 8px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="date"], input[type="submit"] { padding: 8px 12px; margin-right: 20px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+        input[type="submit"] { background: #d9534f; color: white; border: none; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        input[type="submit"]:hover { background: #c9302c; }
+        .back-link { display: inline-block; margin-top: 20px; color: #555; text-decoration: none; font-weight: bold; }
+        .back-link:hover { text-decoration: underline; color: #333; }
+    </style>
+</head>
+<body>
+
+    <div class="header-area">
+        <h1>🧠 Merlion 異常検知トラフィックモニター</h1>
+        <a href="/" class="back-link">← 通常モニターに戻る</a>
+    </div>
+    
+    <!-- 条件指定フォーム -->
+    <div class="search-box">
+        <form method="GET" action="/anomaly_dashboard">
+            <label>対象スイッチ名:</label>
+            <!-- 任意のスイッチ名を手入力、または初期値を設定できるように text 型に変更して安定化 -->
+            <input type="text" name="switch" value="{{ selected_switch or 'switch1' }}" placeholder="例: switch1" required>
+
+            <label>開始日:</label>
+            <input type="date" name="start_dd" value="{{ selected_start_dd }}" required>
+
+            <label>終了日:</label>
+            <input type="date" name="end_dd" value="{{ selected_end_dd }}" required>
+
+<label>検知ロジック:</label>
+<select name="logic" style="padding: 8px; margin-right: 20px; border-radius: 4px; border: 1px solid #ccc;">
+    <option value="stat_threshold" {% if selected_logic == 'stat_threshold' %}selected{% endif %}>直近の急変重視 (StatThreshold)</option>
+    <option value="burst_detector" {% if selected_logic == 'burst_detector' %}selected{% endif %}>連続バースト重視 (Windower)</option> <!-- 💡 追加 -->
+    <option value="isolation_forest" {% if selected_logic == 'isolation_forest' %}selected{% endif %}>総合的な外れ値重視 (Isolation Forest)</option>
+</select>
+
+            <input type="submit" value="🔍 異常値を検出して一括描画">
+        </form>
+    </div>
+
+    <!-- 異常検知グラフの列挙エリア -->
+    {% if csv_filenames %}
+    <h2>📊 AI検出結果グラフ一覧 (期間: {{ selected_start_dd }} 〜 {{ selected_end_dd }})</h2>
+    <p style="color: #666; font-size: 14px; margin-bottom: 20px;">※赤いドット（●）が打たれている箇所が、Merlionによってトラフィック異常と判定されたポイントです。</p>
+    
+    <div class="grid-container">
+        {% for filename in csv_filenames %}
+        <div class="graph-card">
+            <!-- /plot_anomaly エンドポイントから生成された画像を非同期・並列ロード -->
+<!-- 💡 &logic={{ selected_logic }} を末尾に付与 -->
+<img src="/plot_anomaly?mode=range&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}&switch={{ selected_switch }}&filename={{ filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&logic={{ selected_logic }}" alt="グラフを生成中...">
+
+            <p style="font-size: 14px; margin-top: 10px; font-weight: bold; color: #444;">📁 {{ filename }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+        <div style="background: #e9edf5; padding: 30px; border-radius: 8px; text-align: center; color: #666;">
+            <p style="font-size: 16px; font-weight: bold; margin: 0;">検索条件を指定してください</p>
+            <p style="font-size: 13px; margin: 5px 0 0 0;">スイッチ名を入力し、調べたい期間の「開始日」と「終了日」を選んでボタンを押してください。</p>
+        </div>
+    {% endif %}
+
+</body>
+</html>
+

@@ -1,0 +1,6 @@
+python gen_data.py --dir ./test1 --pastsize 3 
+python gen_data.py --dir ./test1 --pastsize 3 --exec
+
+python gen_data.py --dir ./test4 --period 20261020:20261022 --exec
+
+
