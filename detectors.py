@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+
 class AnomalyDetectors:
     """異常検知アルゴリズムを管理するクラス"""
 
@@ -16,11 +17,13 @@ class AnomalyDetectors:
             "z_score_outlier": "【異常検知: 総合外れ値】",
             "static_upper_limit": "【帯域監視: 限界しきい値超過】",
             "silent_drop_detector": "【死活監視: 通信ゼロ/途絶検知】",
-            "volatility_anomaly": "【品質監視: トラフィック乱高下異常】"
+            "volatility_anomaly": "【品質監視: トラフィック乱高下異常】",
         }
 
     @classmethod
-    def detect(cls, logic_name: str, df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
+    def detect(
+        cls, logic_name: str, df: pd.DataFrame, percentile_val: float
+    ) -> pd.DataFrame:
         """
         指定されたロジック名に基づいて異常検知を計算し、異常行（anomalies）のDataFrameを返す
         """
@@ -38,7 +41,9 @@ class AnomalyDetectors:
         df_cp = df.copy()
         df_cp["diff_val"] = df_cp["bps_A"].diff().abs().fillna(0)
         threshold = df_cp["diff_val"].quantile(percentile_val)
-        return df_cp[(df_cp["diff_val"] >= threshold) & (df_cp["diff_val"] > 10_000_000)]
+        return df_cp[
+            (df_cp["diff_val"] >= threshold) & (df_cp["diff_val"] > 10_000_000)
+        ]
 
     @staticmethod
     def _burst_detector(df: pd.DataFrame, percentile_val: float) -> pd.DataFrame:
@@ -47,9 +52,9 @@ class AnomalyDetectors:
         df_cp["next_bps"] = df_cp["bps_A"].shift(-1).fillna(df_cp["bps_A"])
         threshold = df_cp["rolling_mean"].quantile(percentile_val)
         return df_cp[
-            (df_cp["rolling_mean"] >= threshold) &
-            (df_cp["bps_A"] > 15_000_000) &
-            (df_cp["next_bps"] > 15_000_000)
+            (df_cp["rolling_mean"] >= threshold)
+            & (df_cp["bps_A"] > 15_000_000)
+            & (df_cp["next_bps"] > 15_000_000)
         ]
 
     @staticmethod
@@ -70,7 +75,7 @@ class AnomalyDetectors:
         df_cp = df.copy()
         # 💡 例として 800Mbps (800_000_000 bps) を絶対的な危険しきい値として定義
         # 環境に合わせてこの数値を 100M や 1G などに変更可能です
-        DANGER_LIMIT_BPS = 800_000_000 
+        DANGER_LIMIT_BPS = 800_000_000
         return df_cp[df_cp["bps_A"] >= DANGER_LIMIT_BPS]
 
     @staticmethod
@@ -88,7 +93,11 @@ class AnomalyDetectors:
         """3. トラフィック乱高下異常（ジッター・フラッフィングの監視）"""
         df_cp = df.copy()
         # 過去30分間（6点）のトラフィックの「標準偏差（ばらつき）」を動的に計算
-        df_cp["rolling_std"] = df_cp["bps_A"].rolling(window=6, min_periods=1).std().fillna(0)
+        df_cp["rolling_std"] = (
+            df_cp["bps_A"].rolling(window=6, min_periods=1).std().fillna(0)
+        )
         # ばらつきが全体の統計値の上位2%を超えている箇所をフラッピング異常としてマーク
         std_threshold = df_cp["rolling_std"].quantile(0.98)
-        return df_cp[(df_cp["rolling_std"] >= std_threshold) & (df_cp["bps_A"] > 5_000_000)]
+        return df_cp[
+            (df_cp["rolling_std"] >= std_threshold) & (df_cp["bps_A"] > 5_000_000)
+        ]

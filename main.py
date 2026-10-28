@@ -1,6 +1,7 @@
 import warnings
+
 # 将来の仕様変更に関する警告（FutureWarning）をすべて無視する
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 import io
 import glob
@@ -26,10 +27,10 @@ from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 
 # Merlion 関連のインポート
-#from merlion.utils import TimeSeries
-#from merlion.models.anomaly.isolation_forest import IsolationForest, IsolationForestConfig
-#from merlion.models.anomaly.stat_threshold import StatThreshold, StatThresholdConfig
-#from merlion.post_process.threshold import AggregateAlarms
+# from merlion.utils import TimeSeries
+# from merlion.models.anomaly.isolation_forest import IsolationForest, IsolationForestConfig
+# from merlion.models.anomaly.stat_threshold import StatThreshold, StatThresholdConfig
+# from merlion.post_process.threshold import AggregateAlarms
 
 # 💡 外部ファイルから異常検知マネージャーをインポート
 from detectors import AnomalyDetectors
@@ -41,7 +42,12 @@ if current_os == "Windows":
     matplotlib.rcParams["font.family"] = "Yu Gothic"
 elif current_os == "Linux":
     # 環境（CentOS等）にインストールされているフォント名を左から優先検索
-    matplotlib.rcParams["font.family"] = ["VL Gothic", "IPAGothic", "IPAPGothic", "sans-serif"]
+    matplotlib.rcParams["font.family"] = [
+        "VL Gothic",
+        "IPAGothic",
+        "IPAPGothic",
+        "sans-serif",
+    ]
 else:
     matplotlib.rcParams["font.family"] = "sans-serif"
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -54,22 +60,24 @@ templates.env.filters["urldecode"] = urllib.parse.unquote
 
 # ─── 💡 【マルチ化】動的切替用のマッピング辞書 ───
 BASE_DIRS = {
-    #"default": "./test_data/test1",
+    # "default": "./test_data/test1",
     "test1": "./test_data/test1",
     "test2": "./test_data/test2",
-    #"test3": "./test_data/test3",
-    #"test4": "./test_data/test4",
+    # "test3": "./test_data/test3",
+    # "test4": "./test_data/test4",
     # "customer_a": "./gen_csv/month_data_build/customer_a", # 必要に応じて追加
 }
 DEFAULT_DIR = "test1"
 
+
 def get_default_base_id() -> str:
     """ホスト名に基づきデフォルトのbase_idを決定するロジック"""
-    #if gethostname() == "mokka21":
+    # if gethostname() == "mokka21":
     #    return "mokka21_snmp"
-    #return "default"
+    # return "default"
     print("DEFAULT_DIR")
     return DEFAULT_DIR
+
 
 def get_base_dir_path(base_id: Optional[str] = None) -> str:
     """指定されたbase_idから実際の物理ディレクトリパスを安全に解決する"""
@@ -77,17 +85,24 @@ def get_base_dir_path(base_id: Optional[str] = None) -> str:
         base_id = get_default_base_id()
     return BASE_DIRS[base_id]
 
+
 DASHBOARD_REGISTRY = []
+
+
 # ─── 💡 BASE_DIRを引数ベースで動的に受けるように修正 ───
 def get_date_tree(base_id: Optional[str] = None):
     """指定されたデータソースの階層構造（年月/日）をスキャンして辞書型で返す"""
     date_tree = {}
     actual_base = get_base_dir_path(base_id)
-    
-    yyyymm_dirs = sorted([d for d in glob.glob(os.path.join(actual_base, "*")) if os.path.isdir(d)])
+
+    yyyymm_dirs = sorted(
+        [d for d in glob.glob(os.path.join(actual_base, "*")) if os.path.isdir(d)]
+    )
     for ymd in yyyymm_dirs:
         ym_name = os.path.basename(ymd)
-        dd_dirs = sorted([d for d in glob.glob(os.path.join(ymd, "*")) if os.path.isdir(d)])
+        dd_dirs = sorted(
+            [d for d in glob.glob(os.path.join(ymd, "*")) if os.path.isdir(d)]
+        )
         dd_list = [os.path.basename(d) for d in dd_dirs]
         if dd_list:
             date_tree[ym_name] = dd_list
@@ -96,6 +111,7 @@ def get_date_tree(base_id: Optional[str] = None):
 
 # 💡 FastAPIからレスポンスを操作するために Response をインポートに明示的に含めます（上部になければ自動で適用されます）
 from fastapi import Response
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(
@@ -117,11 +133,14 @@ async def index(
     if not base_id:
         base_id = get_default_base_id()
     actual_base = get_base_dir_path(base_id)
-    
+
     # 選択された環境から日付ツリーをフレッシュに取得
     date_tree = get_date_tree(base_id)
     if not date_tree:
-        return HTMLResponse(content=f"<h1>エラー: ディレクトリが見つかりません。({base_id})</h1>", status_code=500)
+        return HTMLResponse(
+            content=f"<h1>エラー: ディレクトリが見つかりません。({base_id})</h1>",
+            status_code=500,
+        )
 
     # ─── 2. 対象月(yyyymm)の確定ロジック ───
     available_yyyymm = list(date_tree.keys())
@@ -132,7 +151,9 @@ async def index(
     # ─── 3. 【重要】確定した月をベースに、有効な日付リストを「ここで確実に生成」 ───
     available_dds = date_tree.get(yyyymm, [])
     if not available_dds:
-        return HTMLResponse(content=f"<h1>エラー: 有効な日がありません。</h1>", status_code=500)
+        return HTMLResponse(
+            content=f"<h1>エラー: 有効な日がありません。</h1>", status_code=500
+        )
 
     # ─── 4. 対象日(dd)の確定ロジック ───
     # 画面から届いた dd が空、または現在の月リストの中に存在しない場合は最新（末尾）をセット
@@ -142,7 +163,13 @@ async def index(
     # ─── 5. ディレクトリ配下のスイッチ・CSVファイルを再検索 ───
     selected_date = f"{yyyymm}/{dd}"
     date_dir = os.path.join(actual_base, selected_date)
-    available_switches = sorted([os.path.basename(d) for d in glob.glob(os.path.join(date_dir, "*")) if os.path.isdir(d)])
+    available_switches = sorted(
+        [
+            os.path.basename(d)
+            for d in glob.glob(os.path.join(date_dir, "*"))
+            if os.path.isdir(d)
+        ]
+    )
 
     # スイッチが指定されていない、またはリストにない場合のフォールバック
     if not switch or switch not in available_switches:
@@ -156,7 +183,7 @@ async def index(
         csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
         info_json_path = os.path.join(target_dir, "info.json")
         if os.path.exists(info_json_path):
-            with open(info_json_path, 'r', encoding='utf-8') as f:
+            with open(info_json_path, "r", encoding="utf-8") as f:
                 info_dic = json.load(f)
 
     # ─── 6. HTML（Jinja2）側へ、整合性を完全に合わせたコンテキストデータを引き渡す ───
@@ -164,40 +191,46 @@ async def index(
         request=request,
         name="index.html",
         context={
-            "base_ids": list(BASE_DIRS.keys()),     
-            "selected_base_id": base_id,            
-            "date_tree": date_tree, 
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "date_tree": date_tree,
             "current_mode": mode,
-            "selected_start_dd": start_dd, 
+            "selected_start_dd": start_dd,
             "selected_end_dd": end_dd,
-            
             # HTML側の変数判定（selected_yyyymm / selected_dd）へ確実にバインド
-            "selected_yyyymm": yyyymm, 
-            "selected_dd": dd, 
+            "selected_yyyymm": yyyymm,
+            "selected_dd": dd,
             "available_dds": available_dds,  # 👈 これでJinja2のループが絶対に破綻しません
-            
-            "switches": available_switches, 
-            "selected_switch": switch, 
+            "switches": available_switches,
+            "selected_switch": switch,
             "selected_cols": cols,
-            
             # 時間の選択状態を維持
-            "start_hour": int(start_hour), 
-            "end_hour": int(end_hour), 
-            
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
             "csv_filenames": csv_filenames,
-            "info_dic": info_dic, 
+            "info_dic": info_dic,
             "registry": DASHBOARD_REGISTRY,
             "yesterday": yesterday,
             "today": today,
-        }
+        },
     )
+
 
 @app.get("/plot")
 async def plot_graph(
-    base_id: Optional[str] = None, # 💡 クエリパラメータを追加
-    mode: str = "single", yyyymm: Optional[str] = None, dd: Optional[str] = None,
-    switch: Optional[str] = None, filename: Optional[str] = None, cols: int = 2,
-    start_hour: int = 8, end_hour: int = 18, desc: str = "", speed: str = "", start_dd: str = "", end_dd: str = "", 
+    base_id: Optional[str] = None,  # 💡 クエリパラメータを追加
+    mode: str = "single",
+    yyyymm: Optional[str] = None,
+    dd: Optional[str] = None,
+    switch: Optional[str] = None,
+    filename: Optional[str] = None,
+    cols: int = 2,
+    start_hour: int = 8,
+    end_hour: int = 18,
+    desc: str = "",
+    speed: str = "",
+    start_dd: str = "",
+    end_dd: str = "",
 ):
     # 💡 パス解決
     actual_base = get_base_dir_path(base_id)
@@ -205,46 +238,59 @@ async def plot_graph(
     fig_size = (14, 4.0) if cols == 1 else (6, 2.8) if cols == 4 else (8, 3.0)
     fig = Figure(figsize=fig_size)
     ax = fig.subplots()
-    
+
     g_speed = ""
     if speed != "":
-        g_speed = str(int(speed)//1000) + "Gbps"
+        g_speed = str(int(speed) // 1000) + "Gbps"
 
     try:
         df_list = []
-        
+
         # ─── 期間指定モード (range) ───
         if mode == "range" and start_dd and end_dd:
             start_date_obj = pd.to_datetime(start_dd.replace("/", "-"))
             end_date_obj = pd.to_datetime(end_dd.replace("/", "-"))
             dr = pd.date_range(start=start_date_obj, end=end_date_obj)
-            
+
             for d in dr:
                 ym_dir = d.strftime("%Y%m")
-                d_single = str(d.day)        
-                d_double = d.strftime("%d")  
-                
+                d_single = str(d.day)
+                d_double = d.strftime("%d")
+
                 # 💡 actual_base を使用するように変更
                 candidate_paths = [
                     os.path.join(actual_base, ym_dir, d_double, switch, filename),
                     os.path.join(actual_base, ym_dir, d_single, switch, filename),
-                    os.path.join(actual_base, ym_dir, d_double, switch.upper(), filename),
-                    os.path.join(actual_base, ym_dir, d_single, switch.upper(), filename),
+                    os.path.join(
+                        actual_base, ym_dir, d_double, switch.upper(), filename
+                    ),
+                    os.path.join(
+                        actual_base, ym_dir, d_single, switch.upper(), filename
+                    ),
                 ]
-                
+
                 file_path = None
                 for c_path in candidate_paths:
                     if os.path.exists(c_path):
                         file_path = c_path
                         break
-                
+
                 if file_path:
                     _df = await run_in_threadpool(pd.read_csv, file_path, engine="c")
                     if not _df.empty:
                         if len(_df.columns) >= 6:
-                            _df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(_df.columns[6:])
+                            _df.columns = [
+                                "日時",
+                                "INDEX",
+                                "NAME",
+                                "STATUS",
+                                "項目A",
+                                "項目B",
+                            ] + list(_df.columns[6:])
                         elif len(_df.columns) >= 3:
-                            _df.columns = ["日時", "項目A", "項目B"] + list(_df.columns[3:])
+                            _df.columns = ["日時", "項目A", "項目B"] + list(
+                                _df.columns[3:]
+                            )
                         df_list.append(_df)
 
             if df_list:
@@ -265,9 +311,16 @@ async def plot_graph(
                 raise FileNotFoundError(f"ファイルなし: {yyyymm}/{dd}")
 
             df = await run_in_threadpool(pd.read_csv, file_path, engine="c")
-            
+
             if len(df.columns) >= 6:
-                df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+                df.columns = [
+                    "日時",
+                    "INDEX",
+                    "NAME",
+                    "STATUS",
+                    "項目A",
+                    "項目B",
+                ] + list(df.columns[6:])
             elif len(df.columns) >= 3:
                 df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
 
@@ -278,7 +331,7 @@ async def plot_graph(
             x_tick_format = "%H:%M"
 
         # ─── データ整形・ソート ───
-        df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors='coerce')
+        df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
         df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
 
         # ─── ギャップ・日またぎガード ───
@@ -286,7 +339,7 @@ async def plot_graph(
         is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
 
         df["差分A"] = df["項目A"].diff().clip(lower=0)
-        df.loc[is_missing, "差分A"] = None  
+        df.loc[is_missing, "差分A"] = None
         df["bps_A"] = (df["差分A"] * 8) / 300
 
         if "項目B" in df.columns:
@@ -297,46 +350,81 @@ async def plot_graph(
             df["bps_B"] = 0
 
         df_filtered = df[(df["日時"] >= start_time) & (df["日時"] <= end_time)]
-        
+
         fig.set_facecolor("#f0f0f0")
         ax.set_facecolor("#ffffff")
 
         # ─── 描画 ───
         if not df_filtered.empty:
-            ax.fill_between(df_filtered["日時"], df_filtered["bps_A"], color="#00eb0c", alpha=0.9, label="In (bps)")
-            ax.plot(df_filtered["日時"], df_filtered["bps_A"], color="#006600", linewidth=0.8)
+            ax.fill_between(
+                df_filtered["日時"],
+                df_filtered["bps_A"],
+                color="#00eb0c",
+                alpha=0.9,
+                label="In (bps)",
+            )
+            ax.plot(
+                df_filtered["日時"],
+                df_filtered["bps_A"],
+                color="#006600",
+                linewidth=0.8,
+            )
             if "bps_B" in df_filtered.columns:
-                ax.plot(df_filtered["日時"], df_filtered["bps_B"], color="#1000ff", linewidth=1.8, label="Out (bps)")
+                ax.plot(
+                    df_filtered["日時"],
+                    df_filtered["bps_B"],
+                    color="#1000ff",
+                    linewidth=1.8,
+                    label="Out (bps)",
+                )
         else:
-            ax.text(0.5, 0.5, "データがありません", ha="center", va="center", color="red")
+            ax.text(
+                0.5, 0.5, "データがありません", ha="center", va="center", color="red"
+            )
 
         ax.grid(True, which="both", color="#cccccc", linestyle="-", linewidth=0.5)
         ax.set_xlim(start_time, end_time)
         ax.xaxis.set_major_formatter(mdates.DateFormatter(x_tick_format))
         if mode == "range":
-           for label in ax.get_xticklabels():
-               label.set_rotation(30)
-               label.set_horizontalalignment("right")
-        #"""
-        max_val = max(df_filtered["bps_A"].max(), df_filtered["bps_B"].max()) if not df_filtered.empty else 0
+            for label in ax.get_xticklabels():
+                label.set_rotation(30)
+                label.set_horizontalalignment("right")
+        # """
+        max_val = (
+            max(df_filtered["bps_A"].max(), df_filtered["bps_B"].max())
+            if not df_filtered.empty
+            else 0
+        )
         if max_val >= 2_000_000_000:
             MAX_BPS = 10_000_000_000
             ax.set_ylim(0, MAX_BPS)
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000_000:,.1f} G"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(
+                    lambda x, p: f"{x / 1_000_000_000:,.1f} G"
+                )
+            )
             ax.set_ylabel("転送速度 (Gbps)")
-            ax.tick_params(axis='y', colors="red")
+            ax.tick_params(axis="y", colors="red")
         elif max_val >= 1_000_000_000:
             MAX_BPS = 2_000_000_000
             ax.set_ylim(0, MAX_BPS)
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000_000:,.1f} G"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(
+                    lambda x, p: f"{x / 1_000_000_000:,.1f} G"
+                )
+            )
             ax.set_ylabel("転送速度 (Gbps)")
-            ax.tick_params(axis='y', colors="#0080FF")
+            ax.tick_params(axis="y", colors="#0080FF")
         else:
             MAX_BPS = 1_000_000_000
             ax.set_ylim(0, MAX_BPS)
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000_000:,.1f} G"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(
+                    lambda x, p: f"{x / 1_000_000_000:,.1f} G"
+                )
+            )
             ax.set_ylabel("転送速度 (Gbps)")
-        #"""
+        # """
         """
 
         # ─── 💡 【main.py 修正箇所】Y軸の最大値制限と単位表示を Mbps ベースへ最適化 ───
@@ -369,25 +457,45 @@ async def plot_graph(
         """
         # ────────────────────────────────────────────────────────────────────────
 
-
         ax.get_yaxis().get_offset_text().set_visible(False)
-        ax.set_title(f"[{base_id}] {switch}: {filename.replace('.csv', '')}  {g_speed}", fontsize=11, loc="left")
+        ax.set_title(
+            f"[{base_id}] {switch}: {filename.replace('.csv', '')}  {g_speed}",
+            fontsize=11,
+            loc="left",
+        )
         ax.set_title(desc, fontsize=10, loc="right", color="#000000")
         ax.set_xlabel(x_label_text)
 
     except Exception as e:
         traceback.print_exc()
-        ax.text(0.5, 0.5, f"Error: {type(e).__name__}", ha="center", va="center", color="red")
+        ax.text(
+            0.5,
+            0.5,
+            f"Error: {type(e).__name__}",
+            ha="center",
+            va="center",
+            color="red",
+        )
 
-    fig.legend(bbox_to_anchor=(0.13, -0.09), loc='lower left', ncol=2, frameon=True, facecolor="#ffffff", edgecolor="#cccccc")
+    fig.legend(
+        bbox_to_anchor=(0.13, -0.09),
+        loc="lower left",
+        ncol=2,
+        frameon=True,
+        facecolor="#ffffff",
+        edgecolor="#cccccc",
+    )
     plt.subplots_adjust(bottom=0.25)
     fig.tight_layout()
 
     img = io.BytesIO()
-    await run_in_threadpool(fig.savefig, img, format="png", bbox_inches="tight", dpi=120)
+    await run_in_threadpool(
+        fig.savefig, img, format="png", bbox_inches="tight", dpi=120
+    )
     img.seek(0)
     fig.clear()
     return StreamingResponse(img, media_type="image/png")
+
 
 @app.get("/timeseries_board__", response_class=HTMLResponse)
 async def timeseries_board__(
@@ -409,11 +517,14 @@ async def timeseries_board__(
     if not base_id:
         base_id = get_default_base_id()
     actual_base = get_base_dir_path(base_id)
-    
+
     # 選択された環境から日付ツリーをフレッシュに取得
     date_tree = get_date_tree(base_id)
     if not date_tree:
-        return HTMLResponse(content=f"<h1>エラー: ディレクトリが見つかりません。({base_id})</h1>", status_code=500)
+        return HTMLResponse(
+            content=f"<h1>エラー: ディレクトリが見つかりません。({base_id})</h1>",
+            status_code=500,
+        )
 
     # ─── 2. 対象月(yyyymm)の確定ロジック ───
     available_yyyymm = list(date_tree.keys())
@@ -424,7 +535,9 @@ async def timeseries_board__(
     # ─── 3. 【重要】確定した月をベースに、有効な日付リストを「ここで確実に生成」 ───
     available_dds = date_tree.get(yyyymm, [])
     if not available_dds:
-        return HTMLResponse(content=f"<h1>エラー: 有効な日がありません。</h1>", status_code=500)
+        return HTMLResponse(
+            content=f"<h1>エラー: 有効な日がありません。</h1>", status_code=500
+        )
 
     # ─── 4. 対象日(dd)の確定ロジック ───
     # 画面から届いた dd が空、または現在の月リストの中に存在しない場合は最新（末尾）をセット
@@ -434,7 +547,13 @@ async def timeseries_board__(
     # ─── 5. ディレクトリ配下のスイッチ・CSVファイルを再検索 ───
     selected_date = f"{yyyymm}/{dd}"
     date_dir = os.path.join(actual_base, selected_date)
-    available_switches = sorted([os.path.basename(d) for d in glob.glob(os.path.join(date_dir, "*")) if os.path.isdir(d)])
+    available_switches = sorted(
+        [
+            os.path.basename(d)
+            for d in glob.glob(os.path.join(date_dir, "*"))
+            if os.path.isdir(d)
+        ]
+    )
 
     # スイッチが指定されていない、またはリストにない場合のフォールバック
     if not switch or switch not in available_switches:
@@ -448,7 +567,7 @@ async def timeseries_board__(
         csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
         info_json_path = os.path.join(target_dir, "info.json")
         if os.path.exists(info_json_path):
-            with open(info_json_path, 'r', encoding='utf-8') as f:
+            with open(info_json_path, "r", encoding="utf-8") as f:
                 info_dic = json.load(f)
 
     # ─── 6. HTML（Jinja2）側へ、整合性を完全に合わせたコンテキストデータを引き渡す ───
@@ -456,109 +575,152 @@ async def timeseries_board__(
         request=request,
         name="timeseries_board.html",
         context={
-            "base_ids": list(BASE_DIRS.keys()),     
-            "selected_base_id": base_id,            
-            "date_tree": date_tree, 
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "date_tree": date_tree,
             "current_mode": mode,
-            "selected_start_dd": start_dd, 
+            "selected_start_dd": start_dd,
             "selected_end_dd": end_dd,
-            
             # HTML側の変数判定（selected_yyyymm / selected_dd）へ確実にバインド
-            "selected_yyyymm": yyyymm, 
-            "selected_dd": dd, 
+            "selected_yyyymm": yyyymm,
+            "selected_dd": dd,
             "available_dds": available_dds,  # 👈 これでJinja2のループが絶対に破綻しません
-            
-            "switches": available_switches, 
-            "selected_switch": switch, 
-            #"selected_cols": cols,
-            
+            "switches": available_switches,
+            "selected_switch": switch,
+            # "selected_cols": cols,
             # 時間の選択状態を維持
-            "start_hour": int(start_hour), 
-            "end_hour": int(end_hour), 
-            
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
             "csv_filenames": csv_filenames,
-            "info_dic": info_dic, 
+            "info_dic": info_dic,
             "registry": DASHBOARD_REGISTRY,
             "yesterday": yesterday,
             "today": today,
-        }
+        },
     )
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
-    request: Request, 
-    base_id: Optional[str] = None, # 💡 追加
-    mode: str = "single", yyyymm: str = "", dd: str = "",
-    start_dd: str = "", end_dd: str = "", cols: int = 2, start_hour: int = 8, end_hour: int = 18,
+    request: Request,
+    base_id: Optional[str] = None,  # 💡 追加
+    mode: str = "single",
+    yyyymm: str = "",
+    dd: str = "",
+    start_dd: str = "",
+    end_dd: str = "",
+    cols: int = 2,
+    start_hour: int = 8,
+    end_hour: int = 18,
 ):
     if not base_id:
         base_id = get_default_base_id()
 
-    date_tree = get_date_tree(base_id) # 💡 引数追加
+    date_tree = get_date_tree(base_id)  # 💡 引数追加
     available_yyyymm = list(date_tree.keys())
     if not yyyymm or yyyymm not in date_tree:
-        yyyymm = available_yyyymm[-1] if available_yyyymm else "" 
+        yyyymm = available_yyyymm[-1] if available_yyyymm else ""
 
     available_dds = date_tree.get(yyyymm, [])
     if not dd or dd not in available_dds:
-        dd = available_dds[-1] if available_dds else ""  
+        dd = available_dds[-1] if available_dds else ""
 
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
-            "base_ids": list(BASE_DIRS.keys()),     # 💡 追加
-            "selected_base_id": base_id,            # 💡 追加
-            "registry": DASHBOARD_REGISTRY, "date_tree": date_tree,
-            "current_mode": mode, "selected_start_dd": start_dd, "selected_end_dd": end_dd,
-            "selected_yyyymm": yyyymm, "selected_dd": dd, "available_dds": available_dds,
-            "selected_cols": cols, "start_hour": start_hour, "end_hour": end_hour,
-        }
+            "base_ids": list(BASE_DIRS.keys()),  # 💡 追加
+            "selected_base_id": base_id,  # 💡 追加
+            "registry": DASHBOARD_REGISTRY,
+            "date_tree": date_tree,
+            "current_mode": mode,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "selected_yyyymm": yyyymm,
+            "selected_dd": dd,
+            "available_dds": available_dds,
+            "selected_cols": cols,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+        },
     )
 
 
 @app.post("/dashboard/add")
 async def dashboard_add(
-    yyyymm: str = Form(...), dd: str = Form(...), switch: str = Form(...), filename: str = Form(...), desc: str = Form(""),
-    base_id: str = Form("default"), # 💡 フォーム受け入れを追加
+    yyyymm: str = Form(...),
+    dd: str = Form(...),
+    switch: str = Form(...),
+    filename: str = Form(...),
+    desc: str = Form(""),
+    base_id: str = Form("default"),  # 💡 フォーム受け入れを追加
 ):
     if yyyymm and dd and switch and filename:
-        exists = any(i["yyyymm"] == yyyymm and i["dd"] == dd and i["switch"] == switch and i["filename"] == filename and i["desc"] == desc and i.get("base_id") == base_id for i in DASHBOARD_REGISTRY)
+        exists = any(
+            i["yyyymm"] == yyyymm
+            and i["dd"] == dd
+            and i["switch"] == switch
+            and i["filename"] == filename
+            and i["desc"] == desc
+            and i.get("base_id") == base_id
+            for i in DASHBOARD_REGISTRY
+        )
         if not exists:
-            DASHBOARD_REGISTRY.append({"yyyymm": yyyymm, "dd": dd, "switch": switch, "filename": filename, "desc": desc, "base_id": base_id})
-    return RedirectResponse(url=f"/?base_id={base_id}&mode=single&yyyymm={yyyymm}&dd={dd}&switch={switch}", status_code=status.HTTP_303_SEE_OTHER)
+            DASHBOARD_REGISTRY.append(
+                {
+                    "yyyymm": yyyymm,
+                    "dd": dd,
+                    "switch": switch,
+                    "filename": filename,
+                    "desc": desc,
+                    "base_id": base_id,
+                }
+            )
+    return RedirectResponse(
+        url=f"/?base_id={base_id}&mode=single&yyyymm={yyyymm}&dd={dd}&switch={switch}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/dashboard/delete")
 async def dashboard_delete(index: int = Form(...), base_id: str = Form("default")):
     if 0 <= index < len(DASHBOARD_REGISTRY):
         DASHBOARD_REGISTRY.pop(index)
-    return RedirectResponse(url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
 
 @app.post("/dashboard/moveup")
 async def dashboard_moveup(index: int = Form(...), base_id: str = Form("default")):
     if 0 <= index < len(DASHBOARD_REGISTRY):
-        if 0 < index :
+        if 0 < index:
             item = DASHBOARD_REGISTRY.pop(index)
             DASHBOARD_REGISTRY.insert(index - 1, item)
-    return RedirectResponse(url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
 
 @app.post("/dashboard/movedown")
 async def dashboard_movedown(index: int = Form(...), base_id: str = Form("default")):
     if 0 <= index < len(DASHBOARD_REGISTRY):
-        if  index < len(DASHBOARD_REGISTRY) -1:
+        if index < len(DASHBOARD_REGISTRY) - 1:
             item = DASHBOARD_REGISTRY.pop(index)
-            DASHBOARD_REGISTRY.insert(index + 1 , item)
-    return RedirectResponse(url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER)
+            DASHBOARD_REGISTRY.insert(index + 1, item)
+    return RedirectResponse(
+        url=f"/dashboard?base_id={base_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
 
 @app.get("/anomaly_dashboard", response_class=HTMLResponse)
 async def anomaly_dashboard(
     request: Request,
-    base_id: Optional[str] = None, # 💡 追加
+    base_id: Optional[str] = None,  # 💡 追加
     start_dd: str = "",
     end_dd: str = "",
     switch: str = "",
-    logic: str = "stat_threshold",  
+    logic: str = "stat_threshold",
     start_hour: int = 8,
     end_hour: int = 18,
 ):
@@ -566,7 +728,7 @@ async def anomaly_dashboard(
         base_id = get_default_base_id()
     actual_base = get_base_dir_path(base_id)
 
-    date_tree = get_date_tree(base_id) # 💡 引数追加
+    date_tree = get_date_tree(base_id)  # 💡 引数追加
     csv_filenames = []
 
     available_switches = []  # 💡 プルダウン用のスイッチリストを初期化
@@ -577,15 +739,21 @@ async def anomaly_dashboard(
     if start_dd:
         try:
             p_date = pd.to_datetime(start_dd)
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")))
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day)))
+            scan_date_dirs.append(
+                os.path.join(
+                    actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")
+                )
+            )
+            scan_date_dirs.append(
+                os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day))
+            )
         except:
             pass
 
     # 指定がない、または見つからない場合は全体から直近のディレクトリを探索して補完
     for ym, dds in date_tree.items():
         if dds:
-            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1])) # 最新の日
+            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1]))  # 最新の日
 
     # 実際に物理ディレクトリを覗いて配下のスイッチ名をリスト化
     switch_set = set()
@@ -604,7 +772,7 @@ async def anomaly_dashboard(
             ym_dir = parsed_date.strftime("%Y%m")
             d_single = str(parsed_date.day)
             d_double = parsed_date.strftime("%d")
-            
+
             # 💡 actual_base を使用するように変更
             candidate_dirs = [
                 os.path.join(actual_base, ym_dir, d_single, switch),
@@ -612,13 +780,13 @@ async def anomaly_dashboard(
                 os.path.join(actual_base, ym_dir, d_single, switch.upper()),
                 os.path.join(actual_base, ym_dir, d_double, switch.upper()),
             ]
-            
+
             target_dir = None
             for c_dir in candidate_dirs:
                 if os.path.exists(c_dir):
                     target_dir = c_dir
                     break
-                    
+
             if target_dir:
                 switch = os.path.basename(target_dir)
                 csv_files = sorted(glob.glob(os.path.join(target_dir, "*.csv")))
@@ -630,29 +798,36 @@ async def anomaly_dashboard(
         request=request,
         name="anomaly_dashboard.html",
         context={
-            "base_ids": list(BASE_DIRS.keys()),     # 💡 追加
-            "selected_base_id": base_id,            # 💡 追加
-            "actual_base_dir": actual_base,   
+            "base_ids": list(BASE_DIRS.keys()),  # 💡 追加
+            "selected_base_id": base_id,  # 💡 追加
+            "actual_base_dir": actual_base,
             "date_tree": date_tree,
             "available_switches": available_switches,
             "selected_start_dd": start_dd,
             "selected_end_dd": end_dd,
             "selected_switch": switch,
             "logics": AnomalyDetectors.get_available_logics(),
-            "selected_logic": logic,  
+            "selected_logic": logic,
             "start_hour": start_hour,
             "end_hour": end_hour,
             "csv_filenames": csv_filenames,
-        }
+        },
     )
 
 
 @app.get("/plot_anomaly")
 async def plot_anomaly(
     base_id: Optional[str] = None,
-    mode: str = "range", yyyymm: Optional[str] = None, dd: Optional[str] = None,
-    switch: Optional[str] = None, filename: Optional[str] = None, cols: int = 2,
-    start_hour: int = 8, end_hour: int = 18, start_dd: str = "", end_dd: str = "",
+    mode: str = "range",
+    yyyymm: Optional[str] = None,
+    dd: Optional[str] = None,
+    switch: Optional[str] = None,
+    filename: Optional[str] = None,
+    cols: int = 2,
+    start_hour: int = 8,
+    end_hour: int = 18,
+    start_dd: str = "",
+    end_dd: str = "",
     logic: str = "stat_threshold",
 ):
     actual_base = get_base_dir_path(base_id)
@@ -668,7 +843,9 @@ async def plot_anomaly(
         if start_dd and end_dd:
             dr = pd.date_range(start=start_dd, end=end_dd)
             for d in dr:
-                file_path = os.path.join(actual_base, d.strftime("%Y%m"), d.strftime("%d"), switch, filename)
+                file_path = os.path.join(
+                    actual_base, d.strftime("%Y%m"), d.strftime("%d"), switch, filename
+                )
                 if os.path.exists(file_path):
                     _df = await run_in_threadpool(pd.read_csv, file_path, engine="c")
                     if not _df.empty:
@@ -687,11 +864,13 @@ async def plot_anomaly(
             raise ValueError("期間指定が必要です。")
 
         if len(df.columns) >= 6:
-            df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+            df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(
+                df.columns[6:]
+            )
         elif len(df.columns) >= 3:
             df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
 
-        df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors='coerce')
+        df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
         df = df.dropna(subset=["日時"])
         df = df[(df["日時"] >= start_time) & (df["日時"] <= end_time)]
         df = df.sort_values("日時").reset_index(drop=True)
@@ -709,7 +888,7 @@ async def plot_anomaly(
         ax.set_facecolor("#ffffff")
 
         if not df.empty:
-            df = df[~df["日時"].duplicated(keep='first')].reset_index(drop=True)
+            df = df[~df["日時"].duplicated(keep="first")].reset_index(drop=True)
 
             max_points = 1000
             if len(df) > max_points:
@@ -719,58 +898,114 @@ async def plot_anomaly(
                 df_filtered = df.copy()
 
             # 通常のトラフィック線（緑色）をプロット
-            ax.plot(df_filtered.index, df_filtered["bps_A"], color="#006600", linewidth=0.8, label="In (bps)")
-            ax.fill_between(df_filtered.index, df_filtered["bps_A"], color="#00eb0c", alpha=0.4)
+            ax.plot(
+                df_filtered.index,
+                df_filtered["bps_A"],
+                color="#006600",
+                linewidth=0.8,
+                label="In (bps)",
+            )
+            ax.fill_between(
+                df_filtered.index, df_filtered["bps_A"], color="#00eb0c", alpha=0.4
+            )
 
             # ─── 🧠 💡【外部ファイル化】ロジック呼び出しを1行に集約 ───
             # logic に応じたパーセンタイル閾値の自動決定
-            percentile_val = 0.95 if logic == "burst_detector" else 0.98 if logic == "z_score_outlier" else 0.99
+            percentile_val = (
+                0.95
+                if logic == "burst_detector"
+                else 0.98
+                if logic == "z_score_outlier"
+                else 0.99
+            )
 
             # 外部モジュール（detectors.py）を実行して赤ドット（異常値）の行を取得
             anomalies = AnomalyDetectors.detect(logic, df_filtered, percentile_val)
 
             # グラフ左上に表示する日本語タイトルを外部定義から自動取得
-            title_prefix = AnomalyDetectors.get_available_logics().get(logic, "【異常検知】")
+            title_prefix = AnomalyDetectors.get_available_logics().get(
+                logic, "【異常検知】"
+            )
 
             # 🔴 異常値ポイントを赤ドットでプロット
             if not anomalies.empty:
-                ax.scatter(anomalies.index, anomalies["bps_A"], color="red", s=15, zorder=5, label="Anomaly")
+                ax.scatter(
+                    anomalies.index,
+                    anomalies["bps_A"],
+                    color="red",
+                    s=15,
+                    zorder=5,
+                    label="Anomaly",
+                )
 
             ax.set_xlim(0, len(df_filtered) - 1)
-            tick_indices = [0, len(df_filtered)//4, len(df_filtered)//2, (len(df_filtered)*3)//4, len(df_filtered)-1]
-            tick_labels = [df_filtered["日時"].iloc[i].strftime(x_tick_format) for i in tick_indices if i < len(df_filtered)]
+            tick_indices = [
+                0,
+                len(df_filtered) // 4,
+                len(df_filtered) // 2,
+                (len(df_filtered) * 3) // 4,
+                len(df_filtered) - 1,
+            ]
+            tick_labels = [
+                df_filtered["日時"].iloc[i].strftime(x_tick_format)
+                for i in tick_indices
+                if i < len(df_filtered)
+            ]
             ax.set_xticks(tick_indices)
             ax.set_xticklabels(tick_labels, rotation=30, ha="right")
         else:
-            ax.text(0.5, 0.5, "データがありません", ha="center", va="center", color="red")
+            ax.text(
+                0.5, 0.5, "データがありません", ha="center", va="center", color="red"
+            )
             title_prefix = "【異常検知】"
 
         max_val = df_filtered["bps_A"].max() if not df_filtered.empty else 0
         if max_val >= 1_000_000:
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000:,.1f} M"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000:,.1f} M")
+            )
             ax.set_ylabel("転送速度 (Mbps)")
         elif max_val >= 1_000:
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000:,.0f} K"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000:,.0f} K")
+            )
             ax.set_ylabel("転送速度 (Kbps)")
         else:
-            ax.get_yaxis().set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:,.0f}"))
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
+            )
             ax.set_ylabel("転送速度 (bps)")
 
-        ax.set_title(f"{title_prefix} {switch}: {filename.replace('.csv', '')}", fontsize=11, loc="left", color="darkred")
+        ax.set_title(
+            f"{title_prefix} {switch}: {filename.replace('.csv', '')}",
+            fontsize=11,
+            loc="left",
+            color="darkred",
+        )
         ax.set_xlabel(x_label_text)
     except Exception as e:
         traceback.print_exc()
-        ax.text(0.5, 0.5, f"Error: {type(e).__name__}", ha="center", va="center", color="red")
+        ax.text(
+            0.5,
+            0.5,
+            f"Error: {type(e).__name__}",
+            ha="center",
+            va="center",
+            color="red",
+        )
 
-    fig.legend(bbox_to_anchor=(0.13, -0.04), loc='lower left', ncol=2, frameon=True)
+    fig.legend(bbox_to_anchor=(0.13, -0.04), loc="lower left", ncol=2, frameon=True)
     plt.subplots_adjust(bottom=0.25)
     fig.tight_layout()
 
     img = io.BytesIO()
-    await run_in_threadpool(fig.savefig, img, format="png", bbox_inches="tight", dpi=120)
+    await run_in_threadpool(
+        fig.savefig, img, format="png", bbox_inches="tight", dpi=120
+    )
     img.seek(0)
     fig.clear()
     return StreamingResponse(img, media_type="image/png")
+
 
 """
 @app.get("/plot_anomaly")
@@ -1093,14 +1328,15 @@ async def plot_anomaly(
     return StreamingResponse(img, media_type="image/png")
 """
 
+
 @app.get("/timeseries_board", response_class=HTMLResponse)
 async def timeseries_board(
     request: Request,
-    base_id: Optional[str] = None, # 💡 追加
+    base_id: Optional[str] = None,  # 💡 追加
     start_dd: str = "",
     end_dd: str = "",
     switch: str = "",
-    logic: str = "stat_threshold",  
+    logic: str = "stat_threshold",
     start_hour: int = 8,
     end_hour: int = 18,
 ):
@@ -1108,7 +1344,7 @@ async def timeseries_board(
         base_id = get_default_base_id()
     actual_base = get_base_dir_path(base_id)
 
-    date_tree = get_date_tree(base_id) # 💡 引数追加
+    date_tree = get_date_tree(base_id)  # 💡 引数追加
     csv_filenames = []
 
     available_switches = []  # 💡 プルダウン用のスイッチリストを初期化
@@ -1119,15 +1355,21 @@ async def timeseries_board(
     if start_dd:
         try:
             p_date = pd.to_datetime(start_dd)
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")))
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day)))
+            scan_date_dirs.append(
+                os.path.join(
+                    actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")
+                )
+            )
+            scan_date_dirs.append(
+                os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day))
+            )
         except:
             pass
 
     # 指定がない、または見つからない場合は全体から直近のディレクトリを探索して補完
     for ym, dds in date_tree.items():
         if dds:
-            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1])) # 最新の日
+            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1]))  # 最新の日
 
     # 実際に物理ディレクトリを覗いて配下のスイッチ名をリスト化
     switch_set = set()
@@ -1147,7 +1389,7 @@ async def timeseries_board(
             ym_dir = parsed_date.strftime("%Y%m")
             d_single = str(parsed_date.day)
             d_double = parsed_date.strftime("%d")
-            
+
             # 💡 actual_base を使用するように変更
             candidate_dirs = [
                 os.path.join(actual_base, ym_dir, d_single, switch),
@@ -1155,49 +1397,50 @@ async def timeseries_board(
                 os.path.join(actual_base, ym_dir, d_single, switch.upper()),
                 os.path.join(actual_base, ym_dir, d_double, switch.upper()),
             ]
-            
+
             target_dir = None
             for c_dir in candidate_dirs:
                 if os.path.exists(c_dir):
                     target_dir = c_dir
                     break
-                    
+
             if target_dir:
                 switch = os.path.basename(target_dir)
                 csv_files = sorted(glob.glob(os.path.join(target_dir, "*.csv")))
                 csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
                 info_json_path = os.path.join(target_dir, "info.json")
                 if os.path.exists(info_json_path):
-                    with open(info_json_path, 'r', encoding='utf-8') as f:
+                    with open(info_json_path, "r", encoding="utf-8") as f:
                         info_dic = json.load(f)
         except Exception as e:
             print(f"[エラー] パス解決処理中に障害が発生しました: {e}")
-
 
     return templates.TemplateResponse(
         request=request,
         name="timeseries_board.html",
         context={
-            "base_ids": list(BASE_DIRS.keys()),     # 💡 追加
-            "selected_base_id": base_id,            # 💡 追加
-            "actual_base_dir": actual_base,   
+            "base_ids": list(BASE_DIRS.keys()),  # 💡 追加
+            "selected_base_id": base_id,  # 💡 追加
+            "actual_base_dir": actual_base,
             "date_tree": date_tree,
             "available_switches": available_switches,
             "selected_start_dd": start_dd,
             "selected_end_dd": end_dd,
             "selected_switch": switch,
             "logics": AnomalyDetectors.get_available_logics(),
-            "selected_logic": logic,  
+            "selected_logic": logic,
             "start_hour": start_hour,
             "end_hour": end_hour,
             "csv_filenames": csv_filenames,
             "info_dic": info_dic,
-        }
+        },
     )
+
 
 # main.py の @app.get("/timeseries_board") を以下のようにアップデートします
 
 # main.py の @app.get("/timeseries_board") を以下のように差し替えます
+
 
 @app.get("/timeseries_board2", response_class=HTMLResponse)
 async def timeseries_board2(
@@ -1207,7 +1450,7 @@ async def timeseries_board2(
     end_dd: str = "",
     switch: str = "",
     filename: Optional[str] = None,  # 💡 クエリパラメータとして確実に受け取る
-    logic: str = "stat_threshold",  
+    logic: str = "stat_threshold",
     start_hour: int = 8,
     end_hour: int = 18,
 ):
@@ -1224,8 +1467,14 @@ async def timeseries_board2(
     if start_dd:
         try:
             p_date = pd.to_datetime(start_dd)
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")))
-            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day)))
+            scan_date_dirs.append(
+                os.path.join(
+                    actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")
+                )
+            )
+            scan_date_dirs.append(
+                os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day))
+            )
         except:
             pass
 
@@ -1240,7 +1489,7 @@ async def timeseries_board2(
                 if os.path.isdir(d):
                     switch_set.add(os.path.basename(d))
     available_switches = sorted(list(switch_set))
-    
+
     if not switch or switch not in available_switches:
         switch = available_switches[0] if available_switches else ""
 
@@ -1249,24 +1498,42 @@ async def timeseries_board2(
     if switch:
         # 探索する優先度順にディレクトリ候補をスタックする
         candidate_dirs = []
-        
+
         # 候補①: 画面で指定された開始日
         if start_dd:
             try:
                 parsed_date = pd.to_datetime(start_dd)
                 ym_dir = parsed_date.strftime("%Y%m")
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, parsed_date.strftime("%d"), switch))
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, str(parsed_date.day), switch))
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, parsed_date.strftime("%d"), switch.upper()))
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, str(parsed_date.day), switch.upper()))
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, str(parsed_date.day), switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch.upper()
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, str(parsed_date.day), switch.upper()
+                    )
+                )
             except:
                 pass
 
         # 候補②: date_tree に存在するすべての月・日を直近から順に全探索
         for ym_dir, dds in reversed(list(date_tree.items())):
             for day_val in reversed(dds):
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, day_val, switch))
-                candidate_dirs.append(os.path.join(actual_base, ym_dir, day_val, switch.upper()))
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch.upper())
+                )
 
         # 最初に見つかった「CSVが存在するディレクトリ」を採用する
         target_dir = None
@@ -1283,10 +1550,10 @@ async def timeseries_board2(
             switch = os.path.basename(target_dir)  # 大文字小文字のズレを吸収
             csv_files = sorted(glob.glob(os.path.join(target_dir, "*.csv")))
             csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
-            
+
             info_json_path = os.path.join(target_dir, "info.json")
             if os.path.exists(info_json_path):
-                with open(info_json_path, 'r', encoding='utf-8') as f:
+                with open(info_json_path, "r", encoding="utf-8") as f:
                     info_dic = json.load(f)
 
     # ─── 3. 選択状態の同期 ───
@@ -1296,6 +1563,7 @@ async def timeseries_board2(
 
     # ─── 4. 指定された期間内の日付リストを生成 ───
     target_days = []
+    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
     if start_dd and end_dd:
         try:
             date_range = pd.date_range(start=start_dd, end=end_dd)
@@ -1303,17 +1571,25 @@ async def timeseries_board2(
                 ym_dir = d.strftime("%Y%m")
                 d_double = d.strftime("%d")
                 d_single = str(d.day)
-                
+
                 # 格納フォルダの0埋め判定
                 resolved_dd = d_double
-                if not os.path.exists(os.path.join(actual_base, ym_dir, d_double, switch)) and os.path.exists(os.path.join(actual_base, ym_dir, d_single, switch)):
+                if not os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_double, switch)
+                ) and os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_single, switch)
+                ):
                     resolved_dd = d_single
 
-                target_days.append({
-                    "yyyymm": ym_dir,
-                    "dd": resolved_dd,
-                    "formatted": d.strftime("%Y-%m-%d")
-                })
+                target_days.append(
+                    {
+                        "yyyymm": ym_dir,
+                        "dd": resolved_dd,
+                        "formatted": d.strftime("%Y-%m-%d"),
+                        "weekdays_jp": weekdays_jp[d.weekday()],
+                        "weekdays_index": d.weekday()
+                    }
+                )
         except Exception as e:
             print(f"日付リスト生成エラー: {e}")
     """
@@ -1341,7 +1617,7 @@ async def timeseries_board2(
     )
     """
 
-# main.py の @app.get("/timeseries_board") の末尾（return の部分）を以下のように書き換えます
+    # main.py の @app.get("/timeseries_board") の末尾（return の部分）を以下のように書き換えます
 
     return templates.TemplateResponse(
         request=request,
@@ -1349,29 +1625,28 @@ async def timeseries_board2(
         context={
             "base_ids": list(BASE_DIRS.keys()),
             "selected_base_id": base_id,
-            "actual_base_dir": actual_base,   
+            "actual_base_dir": actual_base,
             "date_tree": date_tree,
             "available_switches": available_switches,
             "selected_start_dd": start_dd,
             "selected_end_dd": end_dd,
             "selected_switch": switch,
             "logics": AnomalyDetectors.get_available_logics(),
-            "selected_logic": logic,  
-            
+            "selected_logic": logic,
             # ─── 💡 【重要】時間の選択状態をHTML側に確実に引き渡す ───
-            "start_hour": int(start_hour), 
-            "end_hour": int(end_hour), 
-            
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
             "csv_filenames": csv_filenames,
             "selected_filename": filename,
             "info_dic": info_dic,
             "target_days": target_days,
-        }
+        },
     )
 
 
 if __name__ == "__main__":
     import uvicorn
+
     # 💡 起動時にマッピングされている全てのBASE_DIRを走査し、無ければ自動生成する
     for name, path in BASE_DIRS.items():
         if not os.path.exists(path):

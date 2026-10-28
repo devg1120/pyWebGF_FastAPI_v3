@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>登録済みダッシュボード - SNMP トラフィックモニター</title>
-    <style>
+    <head>
+        <meta charset="UTF-8">
+        <title>登録済みダッシュボード - SNMP トラフィックモニター</title>
+        <style>
         body { font-family: sans-serif; background-color: #f9f9f9; color: #333; margin: 20px; }
         .nav-link { display: inline-block; margin-bottom: 20px; text-decoration: none; color: #0066cc; }
         .nav-link:hover { text-decoration: underline; }
@@ -33,178 +33,185 @@
         
         .search-filter { margin: 15px 0; }
         .search-input { padding: 6px 10px; width: 250px; border: 1px solid #ccc; border-radius: 4px; }
-    </style>
-</head>
-<body>
-
-    <h5>📋 登録済みカスタムダッシュボード</h5>
-    
-    <a href="/?base_id={{ selected_base_id }}" class="nav-link">🔙 メインモニター画面に戻る</a>
-
-    <!-- ─── コントロールパネル（一括変更フォーム） ─── -->
-    <div class="control-panel">
-        <form method="GET" action="/dashboard" id="config-form">
-            <!-- 現在選択中のメイン環境IDを hidden で引き継ぐ -->
-            <input type="hidden" name="base_id" value="{{ selected_base_id }}">
-            
-            <div class="form-group">
-                <label>表示モード</label>
-                <select name="mode" id="mode-select" onchange="this.form.submit()">
-                    <option value="single" {% if current_mode == 'single' %}selected{% endif %}>[-] single 通常モード（日を一括変更）</option>
-                    <option value="range" {% if current_mode == 'range' %}selected{% endif %}>[-] range 期間指定モード（期間を一括変更）</option>
-                </select>
+        </style>
+    </head>
+    <body>
+        <h5>📋 登録済みカスタムダッシュボード</h5>
+        <a href="/?base_id={{ selected_base_id }}" class="nav-link">🔙 メインモニター画面に戻る</a>
+        <!-- ─── コントロールパネル（一括変更フォーム） ─── -->
+        <div class="control-panel">
+            <form method="get" action="/dashboard" id="config-form">
+                <!-- 現在選択中のメイン環境IDを hidden で引き継ぐ -->
+                <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+                <div class="form-group">
+                    <label>表示モード</label>
+                    <select name="mode" id="mode-select" onchange="this.form.submit()">
+                        <option value="single"
+                                {% if current_mode == 'single' %}selected{% endif %}>[-] single 通常モード（日を一括変更）</option>
+                        <option value="range"
+                                {% if current_mode == 'range' %}selected{% endif %}>[-] range 期間指定モード（期間を一括変更）</option>
+                    </select>
+                </div>
+                {% if current_mode == "single" %}
+                    <div class="form-group">
+                        <label>一括変更：対象月</label>
+                        <select name="yyyymm" onchange="this.form.submit()">
+                            {% for ym in date_tree.keys() %}
+                                <option value="{{ ym }}"
+                                        {% if ym == selected_yyyymm %}selected{% endif %}>{{ ym[:4] }}年{{ ym[4:] }}月</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>一括変更：対象日</label>
+                        <select name="dd">
+                            {% for d in available_dds %}
+                                <option value="{{ d }}" {% if d == selected_dd %}selected{% endif %}>{{ d }}日</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                {% else %}
+                    <div class="form-group">
+                        <label>一括変更：開始日</label>
+                        <input type="date"
+                               name="start_dd"
+                               value="{{ selected_start_dd or '2026-06-01' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>一括変更：終了日</label>
+                        <input type="date"
+                               name="end_dd"
+                               value="{{ selected_end_dd or '2026-06-01' }}">
+                    </div>
+                {% endif %}
+                <div class="form-group">
+                    <label>表示時間：開始</label>
+                    <select name="start_hour">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }} 時</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>表示時間：終了</label>
+                    <select name="end_hour">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }} 時</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>グラフ列数</label>
+                    <select name="cols" id="cols-select">
+                        <option value="1" {% if selected_cols == 1 %}selected{% endif %}>1 列表示</option>
+                        <option value="2" {% if selected_cols == 2 %}selected{% endif %}>2 列表示 (標準)</option>
+                        <option value="4" {% if selected_cols == 4 %}selected{% endif %}>4 列並び</option>
+                    </select>
+                </div>
+                <div class="form-group" style="padding-top: 18px;">
+                    <button type="submit" class="btn-update">ダッシュボード設定を更新</button>
+                </div>
+            </form>
+        </div>
+        {% if registry %}
+            <!-- ─── クライアントサイド絞り込みフィルター ─── -->
+            <div class="search-filter">
+                <input type="text"
+                       id="dashboard-search"
+                       class="search-input"
+                       placeholder="🔍 登録グラフを絞り込み...">
+                <span style="font-size: 13px; color: #666; margin-left: 10px;">
+                    表示中: <span id="filtered-count">{{ registry|length }}</span> / {{ registry|length }} 件
+                </span>
             </div>
-
-            {% if current_mode == 'single' %}
-            <div class="form-group">
-                <label>一括変更：対象月</label>
-                <select name="yyyymm" onchange="this.form.submit()">
-                    {% for ym in date_tree.keys() %}
-                    <option value="{{ ym }}" {% if ym == selected_yyyymm %}selected{% endif %}>{{ ym[:4] }}年{{ ym[4:] }}月</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label>一括変更：対象日</label>
-                <select name="dd">
-                    {% for d in available_dds %}
-                    <option value="{{ d }}" {% if d == selected_dd %}selected{% endif %}>{{ d }}日</option>
-                    {% endfor %}
-                </select>
-            </div>
-            {% else %}
-            <div class="form-group">
-                <label>一括変更：開始日</label>
-                <input type="date" name="start_dd" value="{{ selected_start_dd or '2026-06-01' }}">
-            </div>
-            <div class="form-group">
-                <label>一括変更：終了日</label>
-                <input type="date" name="end_dd" value="{{ selected_end_dd or '2026-06-01' }}">
-            </div>
-            {% endif %}
-
-            <div class="form-group">
-                <label>表示時間：開始</label>
-                <select name="start_hour">
-                    {% for h in range(0, 24) %}
-                    <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }} 時</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>表示時間：終了</label>
-                <select name="end_hour">
-                    {% for h in range(0, 24) %}
-                    <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }} 時</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>グラフ列数</label>
-                <select name="cols" id="cols-select">
-                    <option value="1" {% if selected_cols == 1 %}selected{% endif %}>1 列表示</option>
-                    <option value="2" {% if selected_cols == 2 %}selected{% endif %}>2 列表示 (標準)</option>
-                    <option value="4" {% if selected_cols == 4 %}selected{% endif %}>4 列並び</option>
-                </select>
-            </div>
-
-            <div class="form-group" style="padding-top: 18px;">
-                <button type="submit" class="btn-update">ダッシュボード設定を更新</button>
-            </div>
-        </form>
-    </div>
-
-    {% if registry %}
-    <!-- ─── クライアントサイド絞り込みフィルター ─── -->
-    <div class="search-filter">
-        <input type="text" id="dashboard-search" class="search-input" placeholder="🔍 登録グラフを絞り込み...">
-        <span style="font-size: 13px; color: #666; margin-left: 10px;">
-            表示中: <span id="filtered-count">{{ registry|length }}</span> / {{ registry|length }} 件
-        </span>
-    </div>
-
-    <!-- ─── ダッシュボード目次 ─── -->
-    <h4>📋 ダッシュボード目次</h4>
-    <ul id="dashboard-toc" style="font-size: 14px; line-height: 1.6; color: #555;list-style-type:none;">
-        {% for item in registry %}
-        {% set ns_if = item.filename | replace('.csv','') %}
-	<li><a href="#chart-card-{{ loop.index0 }}" style="color: #0066cc; text-decoration: none;">[{{item.base_id}} {{ item.switch }}] # {{ ns_if }} {{ item.desc }}</a></li>
-        {% endfor %}
-    </ul>
-    <!-- ─── グラフ描画グリッドエリア ─── -->
-    <div class="chart-grid">
-        {% for item in registry %}
-        {% set ns_if = item.filename | replace('.csv','') %}
-        
-        <!-- 列数設定（selected_cols）に応じてクラスを動的に付与 -->
-        <div class="chart-card cols-{{ selected_cols }}" id="chart-card-{{ loop.index0 }}" data-search-text="{{ item.switch }} {{ ns_if }} {{ item.desc }}">
-            <div class="chart-header">
-               <div style="display:flex;">
-		<button type="button" class="base-id" style="background-color: #0080ff; color: #ffffff; border: 1px solid #0080ff;" disabled>{{item.base_id}}</button>
-		&ensp;
-<!--
+            <!-- ─── ダッシュボード目次 ─── -->
+            <h4>📋 ダッシュボード目次</h4>
+            <ul id="dashboard-toc"
+                style="font-size: 14px;
+                       line-height: 1.6;
+                       color: #555;
+                       list-style-type:none">
+                {% for item in registry %}
+                    {% set ns_if = item.filename | replace('.csv','') %}
+                    <li><a href="#chart-card-{{ loop.index0 }}"
+   style="color: #0066cc;
+          text-decoration: none">[{{ item.base_id }} {{ item.switch }}] # {{ ns_if }} {{ item.desc }}</a></li>
+                {% endfor %}
+            </ul>
+            <!-- ─── グラフ描画グリッドエリア ─── -->
+            <div class="chart-grid">
+                {% for item in registry %}
+                    {% set ns_if = item.filename | replace('.csv','') %}
+                    <!-- 列数設定（selected_cols）に応じてクラスを動的に付与 -->
+                    <div class="chart-card cols-{{ selected_cols }}"
+                         id="chart-card-{{ loop.index0 }}"
+                         data-search-text="{{ item.switch }} {{ ns_if }} {{ item.desc }}">
+                        <div class="chart-header">
+                            <div style="display:flex;">
+                                <button type="button"
+                                        class="base-id"
+                                        style="background-color: #0080ff;
+                                               color: #ffffff;
+                                               border: 1px solid #0080ff"
+                                        disabled>{{ item.base_id }}</button>
+                                &ensp;
+                                <!--
                 <h5 class="chart-title">[{{ item.switch }}] # {{ ns_if }} {% if item.desc %}({{ item.desc }}){% endif %}</h5>
 -->
-
-                   <span style="font-weight: bold; font-size: 0.9em;">
-                                <span style="color: #0288d1;">[{{ item.switch }}]</span> # {{ ns_if }} 
-                                {% if item.desc %}<span style="color: #555; font-weight: normal; margin-left: 5px;">({{ item.desc }})</span>{% endif %}
-                            </span>
-               </div>
-                
-               <div style="display:flex;">
-                <form action="/dashboard/moveup" method="POST" style="margin: 0;">
-                    <input type="hidden" name="index" value="{{ loop.index0 }}">
-                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
-                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
-                    <button type="submit" class="btn-arrow">↑</button>
-                </form>
-                <form action="/dashboard/movedown" method="POST" style="margin: 0;">
-                    <input type="hidden" name="index" value="{{ loop.index0 }}">
-                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
-                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
-                    <button type="submit" class="btn-arrow">↓</button>
-                </form>
-                &nbsp;
-                &nbsp;
-
-                <!-- 削除フォーム -->
-                <form action="/dashboard/delete" method="POST" style="margin: 0;">
-                    <input type="hidden" name="index" value="{{ loop.index0 }}">
-                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
-                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
-                    <button type="submit" class="btn-delete">× </button>
-                </form>
-               </div>
+                                <span style="font-weight: bold; font-size: 0.9em;">
+                                    <span style="color: #0288d1;">[{{ item.switch }}]</span> # {{ ns_if }}
+                                    {% if item.desc %}<span style="color: #555;
+             font-weight: normal;
+             margin-left: 5px">({{ item.desc }})</span>{% endif %}
+                                </span>
+                            </div>
+                            <div style="display:flex;">
+                                <form action="/dashboard/moveup" method="post" style="margin: 0;">
+                                    <input type="hidden" name="index" value="{{ loop.index0 }}">
+                                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
+                                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+                                    <button type="submit" class="btn-arrow">↑</button>
+                                </form>
+                                <form action="/dashboard/movedown" method="post" style="margin: 0;">
+                                    <input type="hidden" name="index" value="{{ loop.index0 }}">
+                                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
+                                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+                                    <button type="submit" class="btn-arrow">↓</button>
+                                </form>
+                                &nbsp;
+                                &nbsp;
+                                <!-- 削除フォーム -->
+                                <form action="/dashboard/delete" method="post" style="margin: 0;">
+                                    <input type="hidden" name="index" value="{{ loop.index0 }}">
+                                    <!-- 削除後に現在の環境を維持して画面を再描画させるために現在の base_id を渡す -->
+                                    <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+                                    <button type="submit" class="btn-delete">×</button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="chart-img-wrapper">
+                            <!-- 💡 data-base-id 属性で各グラフが持っていた固有の環境IDを記憶させます -->
+                            <img class="dashboard-chart-img"
+                                 data-base-id="{{ item.base_id or 'default' }}"
+                                 data-switch="{{ item.switch }}"
+                                 data-filename="{{ item.filename }}"
+                                 data-desc="{{ item.desc or '' }}"
+                                 src=""
+                                 alt="グラフ読み込み中..."
+                                 style="width: 100%;
+                                        height: auto;
+                                        display: block">
+                        </div>
+                    </div>
+                {% endfor %}
             </div>
-            
-            <div class="chart-img-wrapper">
-                <!-- 💡 data-base-id 属性で各グラフが持っていた固有の環境IDを記憶させます -->
-                <img class="dashboard-chart-img" 
-                     data-base-id="{{ item.base_id or 'default' }}" 
-                     data-switch="{{ item.switch }}" 
-                     data-filename="{{ item.filename }}" 
-                     data-desc="{{ item.desc or '' }}" 
-                     src="" 
-                     alt="グラフ読み込み中..." 
-                     style="width: 100%; height: auto; display: block;">
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-
-    {% else %}
-    <!-- レジストリが空の場合 -->
-    <h4>📌 ダッシュボードにはまだ何も登録されていません。</h4>
-    <p style="font-size: 14px; color: #666;">
-        メインモニター画面の各グラフ右上にある「＋ ダッシュボード登録」ボタンを押すと、お気に入りのグラフをここに並べることができます。
-    </p>
-    {% endif %}
-
-    <!-- ─── JavaScriptロジック ─── -->
-    <script>
+        {% else %}
+            <!-- レジストリが空の場合 -->
+            <h4>📌 ダッシュボードにはまだ何も登録されていません。</h4>
+            <p style="font-size: 14px; color: #666;">メインモニター画面の各グラフ右上にある「＋ ダッシュボード登録」ボタンを押すと、お気に入りのグラフをここに並べることができます。</p>
+        {% endif %}
+        <!-- ─── JavaScriptロジック ─── -->
+        <script>
         /**
          * 各グラフが独自の base_id を読み取って /plot 画像をロードする関数
          */
@@ -272,6 +279,6 @@
             loadDashboardCharts();
             initSearchFilter();
         });
-    </script>
-</body>
+        </script>
+    </body>
 </html>

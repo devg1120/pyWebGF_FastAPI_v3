@@ -1,0 +1,7 @@
+
+pip install ruff
+ruff format main.py
+
+pip install djlint
+djlint your_template.html --reformat 
+
