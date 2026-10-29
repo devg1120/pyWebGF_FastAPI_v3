@@ -1792,6 +1792,407 @@ async def timeseries_board3(
         },
     )
 
+@app.get("/timeseries_board4", response_class=HTMLResponse)
+async def timeseries_board4(
+    request: Request,
+    base_id: Optional[str] = None,
+    start_dd: str = "",
+    end_dd: str = "",
+    switch: str = "",
+    filename: Optional[str] = None,  # 💡 クエリパラメータとして確実に受け取る
+    logic: str = "stat_threshold",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    if not base_id:
+        base_id = get_default_base_id()
+    actual_base = get_base_dir_path(base_id)
+
+    date_tree = get_date_tree(base_id)
+    csv_filenames = []
+    available_switches = []
+
+    # ─── 1. スイッチ一覧の動的スキャン ───
+    scan_date_dirs = []
+    if start_dd:
+        try:
+            p_date = pd.to_datetime(start_dd)
+            scan_date_dirs.append(
+                os.path.join(
+                    actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")
+                )
+            )
+            scan_date_dirs.append(
+                os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day))
+            )
+        except:
+            pass
+
+    for ym, dds in date_tree.items():
+        if dds:
+            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1]))
+
+    switch_set = set()
+    for d_dir in scan_date_dirs:
+        if os.path.exists(d_dir):
+            for d in glob.glob(os.path.join(d_dir, "*")):
+                if os.path.isdir(d):
+                    switch_set.add(os.path.basename(d))
+    available_switches = sorted(list(switch_set))
+
+    if not switch or switch not in available_switches:
+        switch = available_switches[0] if available_switches else ""
+
+    # ─── 2. 【最重要】CSVファイル（ポート群）を何が何でも見つけるロジック ───
+    info_dic = {}
+    if switch:
+        # 探索する優先度順にディレクトリ候補をスタックする
+        candidate_dirs = []
+
+        # 候補①: 画面で指定された開始日
+        if start_dd:
+            try:
+                parsed_date = pd.to_datetime(start_dd)
+                ym_dir = parsed_date.strftime("%Y%m")
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, str(parsed_date.day), switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch.upper()
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, str(parsed_date.day), switch.upper()
+                    )
+                )
+            except:
+                pass
+
+        # 候補②: date_tree に存在するすべての月・日を直近から順に全探索
+        for ym_dir, dds in reversed(list(date_tree.items())):
+            for day_val in reversed(dds):
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch.upper())
+                )
+
+        # 最初に見つかった「CSVが存在するディレクトリ」を採用する
+        target_dir = None
+        for c_dir in candidate_dirs:
+            if os.path.exists(c_dir):
+                # 実際に.csvファイルがあるか確認
+                has_csv = len(glob.glob(os.path.join(c_dir, "*.csv"))) > 0
+                if has_csv:
+                    target_dir = c_dir
+                    break
+
+        # ディレクトリが確定したらCSVファイルをロード
+        if target_dir:
+            switch = os.path.basename(target_dir)  # 大文字小文字のズレを吸収
+            csv_files = sorted(glob.glob(os.path.join(target_dir, "*.csv")))
+            csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
+
+            info_json_path = os.path.join(target_dir, "info.json")
+            if os.path.exists(info_json_path):
+                with open(info_json_path, "r", encoding="utf-8") as f:
+                    info_dic = json.load(f)
+
+    # ─── 3. 選択状態の同期 ───
+    # リクエストされたfilenameが空、もしくは取得リストにない場合は先頭のCSVを強制選択
+    if not filename or filename not in csv_filenames:
+        filename = csv_filenames[0] if csv_filenames else ""
+
+    # ─── 4. 指定された期間内の日付リストを生成 ───
+    target_days = []
+    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
+    if start_dd and end_dd:
+        try:
+            date_range = pd.date_range(start=start_dd, end=end_dd)
+            for d in date_range:
+                ym_dir = d.strftime("%Y%m")
+                d_double = d.strftime("%d")
+                d_single = str(d.day)
+
+                # 格納フォルダの0埋め判定
+                resolved_dd = d_double
+                if not os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_double, switch)
+                ) and os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_single, switch)
+                ):
+                    resolved_dd = d_single
+
+                target_days.append(
+                    {
+                        "yyyymm": ym_dir,
+                        "dd": resolved_dd,
+                        "formatted": d.strftime("%Y-%m-%d"),
+                        "weekdays_jp": weekdays_jp[d.weekday()],
+                        "weekdays_index": d.weekday()
+                    }
+                )
+        except Exception as e:
+            print(f"日付リスト生成エラー: {e}")
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="timeseries_board2.html",
+        context={
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "actual_base_dir": actual_base,   
+            "date_tree": date_tree,
+            "available_switches": available_switches,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "selected_switch": switch,
+            "logics": AnomalyDetectors.get_available_logics(),
+            "selected_logic": logic,  
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+            "csv_filenames": csv_filenames,       # 👈 プルダウン用リスト（絶対に空にさせない）
+            "selected_filename": filename,       # 👈 選択されたCSVファイル名（HTML側で判定に使用）
+            "info_dic": info_dic,
+            "target_days": target_days,
+        }
+    )
+    """
+
+    # main.py の @app.get("/timeseries_board") の末尾（return の部分）を以下のように書き換えます
+
+    return templates.TemplateResponse(
+        request=request,
+        name="timeseries_board4.html",
+        context={
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "actual_base_dir": actual_base,
+            "date_tree": date_tree,
+            "available_switches": available_switches,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "selected_switch": switch,
+            "logics": AnomalyDetectors.get_available_logics(),
+            "selected_logic": logic,
+            # ─── 💡 【重要】時間の選択状態をHTML側に確実に引き渡す ───
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
+            "csv_filenames": csv_filenames,
+            "selected_filename": filename,
+            "info_dic": info_dic,
+            "target_days": target_days,
+        },
+    )
+
+@app.get("/timeseries_board5", response_class=HTMLResponse)
+async def timeseries_board5(
+    request: Request,
+    base_id: Optional[str] = None,
+    start_dd: str = "",
+    end_dd: str = "",
+    switch: str = "",
+    filename: Optional[str] = None,  # 💡 クエリパラメータとして確実に受け取る
+    logic: str = "stat_threshold",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    if not base_id:
+        base_id = get_default_base_id()
+    actual_base = get_base_dir_path(base_id)
+
+    date_tree = get_date_tree(base_id)
+    csv_filenames = []
+    available_switches = []
+
+    # ─── 1. スイッチ一覧の動的スキャン ───
+    scan_date_dirs = []
+    if start_dd:
+        try:
+            p_date = pd.to_datetime(start_dd)
+            scan_date_dirs.append(
+                os.path.join(
+                    actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")
+                )
+            )
+            scan_date_dirs.append(
+                os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day))
+            )
+        except:
+            pass
+
+    for ym, dds in date_tree.items():
+        if dds:
+            scan_date_dirs.append(os.path.join(actual_base, ym, dds[-1]))
+
+    switch_set = set()
+    for d_dir in scan_date_dirs:
+        if os.path.exists(d_dir):
+            for d in glob.glob(os.path.join(d_dir, "*")):
+                if os.path.isdir(d):
+                    switch_set.add(os.path.basename(d))
+    available_switches = sorted(list(switch_set))
+
+    if not switch or switch not in available_switches:
+        switch = available_switches[0] if available_switches else ""
+
+    # ─── 2. 【最重要】CSVファイル（ポート群）を何が何でも見つけるロジック ───
+    info_dic = {}
+    if switch:
+        # 探索する優先度順にディレクトリ候補をスタックする
+        candidate_dirs = []
+
+        # 候補①: 画面で指定された開始日
+        if start_dd:
+            try:
+                parsed_date = pd.to_datetime(start_dd)
+                ym_dir = parsed_date.strftime("%Y%m")
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, str(parsed_date.day), switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, parsed_date.strftime("%d"), switch.upper()
+                    )
+                )
+                candidate_dirs.append(
+                    os.path.join(
+                        actual_base, ym_dir, str(parsed_date.day), switch.upper()
+                    )
+                )
+            except:
+                pass
+
+        # 候補②: date_tree に存在するすべての月・日を直近から順に全探索
+        for ym_dir, dds in reversed(list(date_tree.items())):
+            for day_val in reversed(dds):
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch)
+                )
+                candidate_dirs.append(
+                    os.path.join(actual_base, ym_dir, day_val, switch.upper())
+                )
+
+        # 最初に見つかった「CSVが存在するディレクトリ」を採用する
+        target_dir = None
+        for c_dir in candidate_dirs:
+            if os.path.exists(c_dir):
+                # 実際に.csvファイルがあるか確認
+                has_csv = len(glob.glob(os.path.join(c_dir, "*.csv"))) > 0
+                if has_csv:
+                    target_dir = c_dir
+                    break
+
+        # ディレクトリが確定したらCSVファイルをロード
+        if target_dir:
+            switch = os.path.basename(target_dir)  # 大文字小文字のズレを吸収
+            csv_files = sorted(glob.glob(os.path.join(target_dir, "*.csv")))
+            csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
+
+            info_json_path = os.path.join(target_dir, "info.json")
+            if os.path.exists(info_json_path):
+                with open(info_json_path, "r", encoding="utf-8") as f:
+                    info_dic = json.load(f)
+
+    # ─── 3. 選択状態の同期 ───
+    # リクエストされたfilenameが空、もしくは取得リストにない場合は先頭のCSVを強制選択
+    if not filename or filename not in csv_filenames:
+        filename = csv_filenames[0] if csv_filenames else ""
+
+    # ─── 4. 指定された期間内の日付リストを生成 ───
+    target_days = []
+    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
+    if start_dd and end_dd:
+        try:
+            date_range = pd.date_range(start=start_dd, end=end_dd)
+            for d in date_range:
+                ym_dir = d.strftime("%Y%m")
+                d_double = d.strftime("%d")
+                d_single = str(d.day)
+
+                # 格納フォルダの0埋め判定
+                resolved_dd = d_double
+                if not os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_double, switch)
+                ) and os.path.exists(
+                    os.path.join(actual_base, ym_dir, d_single, switch)
+                ):
+                    resolved_dd = d_single
+
+                target_days.append(
+                    {
+                        "yyyymm": ym_dir,
+                        "dd": resolved_dd,
+                        "formatted": d.strftime("%Y-%m-%d"),
+                        "weekdays_jp": weekdays_jp[d.weekday()],
+                        "weekdays_index": d.weekday()
+                    }
+                )
+        except Exception as e:
+            print(f"日付リスト生成エラー: {e}")
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="timeseries_board2.html",
+        context={
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "actual_base_dir": actual_base,   
+            "date_tree": date_tree,
+            "available_switches": available_switches,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "selected_switch": switch,
+            "logics": AnomalyDetectors.get_available_logics(),
+            "selected_logic": logic,  
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+            "csv_filenames": csv_filenames,       # 👈 プルダウン用リスト（絶対に空にさせない）
+            "selected_filename": filename,       # 👈 選択されたCSVファイル名（HTML側で判定に使用）
+            "info_dic": info_dic,
+            "target_days": target_days,
+        }
+    )
+    """
+
+    # main.py の @app.get("/timeseries_board") の末尾（return の部分）を以下のように書き換えます
+
+    return templates.TemplateResponse(
+        request=request,
+        name="timeseries_board5.html",
+        context={
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "actual_base_dir": actual_base,
+            "date_tree": date_tree,
+            "available_switches": available_switches,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "selected_switch": switch,
+            "logics": AnomalyDetectors.get_available_logics(),
+            "selected_logic": logic,
+            # ─── 💡 【重要】時間の選択状態をHTML側に確実に引き渡す ───
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
+            "csv_filenames": csv_filenames,
+            "selected_filename": filename,
+            "info_dic": info_dic,
+            "target_days": target_days,
+        },
+    )
 if __name__ == "__main__":
     import uvicorn
 
