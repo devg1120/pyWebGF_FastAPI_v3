@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <title>タイムシリーズダッシュボード</title>
+        <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; margin: 30px; color: #333; }
+        .header-area { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 2px solid #d9534f; padding-bottom: 10px; }
+        .search-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 25px; }
+        .graph-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border: 1px solid #e1e1e8; }
+        .graph-card img { max-width: 100%; height: auto; border-radius: 4px; }
+        label { margin-right: 8px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="date"], input[type="submit"] { padding: 8px 12px; margin-right: 20px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+        input[type="submit"] { background: #d9534f; color: white; border: none; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        input[type="submit"]:hover { background: #c9302c; }
+        .back-link { display: inline-block; margin-top: 20px; color: #555; text-decoration: none; font-weight: bold; }
+        .back-link:hover { text-decoration: underline; color: #333; }
+        </style>
+    </head>
+    <body>
+        <div class="header-area">
+            <h1>タイムシリーズボード2</h1>
+            <!--
+        <a href="/" class="back-link">← 通常モニターに戻る</a>
+	-->
+            <a href="/?base_id={{ selected_base_id }}">← 通常モニターに戻る</a>
+        </div>
+        <!-- 💡 タイトルヘッダーの周辺（お好みの位置に配置してください） -->
+        <header style="margin-bottom: 20px;
+                       padding-bottom: 10px;
+                       border-bottom: 1px solid #ccc">
+            <!-- 👈 💡 現在のBASE_DIRパスを分かりやすく表示するパーツ -->
+            <div style="display: inline-block;
+                        background-color: #e2e8f0;
+                        color: #4a5568;
+                        padding: 4px 10px;
+                        border-radius: 6px;
+                        font-family: monospace;
+                        font-size: 14px">
+                📁 現在のデータソース: <strong>{{ actual_base_dir }}</strong>
+            </div>
+        </header>
+        <!-- 条件指定フォーム -->
+	{% set port_list2 = [] %}
+
+	<label> port_list: {{port_list2.length}}</label>
+
+        <div class="search-box">
+            <form method="get" action="/timeseries_board2">
+                <!--
+            <label>対象スイッチ名:</label>
+            <input type="text" name="switch" value="{{ selected_switch or 'switch1' }}" placeholder="例: switch1" required>
+-->
+                <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+                <label for="switch_select">対象スイッチ名:</label>
+                <select name="switch" id="switch_select" onchange="this.form.submit()">
+                    <option value="">-- スイッチを選択してください --</option>
+                    {% for ym, dd_list in date_tree.items() %}
+                        {# 例として最新の日付（または全期間）の配下にあるスイッチを表示させるか、メイン画面と共通化します #}
+                    {% endfor %}
+                    {# 💡 main.py から渡される利用可能なスイッチ一覧をループ処理 #}
+                    {% for sw in available_switches %}
+                        <option value="{{ sw }}" {% if sw == selected_switch %}selected{% endif %}>{{ sw }}</option>
+                    {% endfor %}
+                </select>
+                <!-- ポート（ファイル）選択プルダウン -->
+                <div class="form-group" style="display:inline-block; margin-right:10px;">
+                    <label for="filename">ポート選択:</label>
+                    <select name="filename"
+                            id="filename"
+                            class="form-control"
+                            style="width:200px">
+                        {% for f_name in csv_filenames %}
+                            <option value="{{ f_name }}"
+                                    {% if f_name == selected_filename %}selected{% endif %}>
+                                {{ f_name.replace('.csv', '') }} {% if info_dic.get(f_name) %}({{ info_dic.get(f_name) }}){% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+		<button type="button" onclick="handleClick({{port_list2}})">
+    登録
+</button>
+
+                <label>開始日:</label>
+                <input type="date" name="start_dd" value="{{ selected_start_dd }}" required>
+                <label>終了日:</label>
+                <input type="date" name="end_dd" value="{{ selected_end_dd }}" required>
+                <!-- timeseries_board.html の検索フォーム内に追加するコード例 -->
+                <!-- 開始時刻の選択 -->
+                <div class="form-group" style="display:inline-block; margin-right:10px;">
+                    <label for="start_hour">開始時刻:</label>
+                    <select name="start_hour"
+                            id="start_hour"
+                            class="form-control"
+                            style="width:100px">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }}:00</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- 終了時刻の選択 -->
+                <div class="form-group" style="display:inline-block; margin-right:10px;">
+                    <label for="end_hour">終了時刻:</label>
+                    <select name="end_hour"
+                            id="end_hour"
+                            class="form-control"
+                            style="width:100px">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }}:00</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <input type="submit" value="🔍 描画">
+            </form>
+        </div>
+        <!-- 異常検知グラフの列挙エリア -->
+        {% set current_mode = "range" %}
+        {% set selected_cols = "2" %}
+        {% set port_list = ["portA","portB", "portC", "portD",] %}
+        {% set port_list = ["portA"] %}
+        {% set port_list = ["portA", ] %}
+        {% set port_list = ["portA","portB", "portC", "portD","portE"] %}
+        {% set port_list = ["portA","portB", "portC", ] %}
+        {% set port_list = ["portA","portB", "portC", "portD","portE"] %}
+        {% set port_list = ["portA","portB", "portC", "portD","portE", "portF"] %}
+        {% set port_list = ["portA","portB", "portC", "portD","portE"] %}
+        {% set port_list = ["portA","portB", "portC", "portD"] %}
+        {% set port_list = ["portA","portB", "portC", "portD","portE", "portF"] %}
+        {% set port_list = ["portA","portB", "portC", "portD"] %}
+        <!-- timeseries_board.html のグラフ表示領域のイメージ -->
+        <!-- 💡 日数分の1日グラフをタイル並びにするセクション -->
+        {% if selected_filename and target_days %}
+            <div class="port-section" style="margin-top: 20px; margin-bottom: 40px;">
+                <h3 style="font-size: 16px;
+                           border-left: 4px solid #006600;
+                           padding-left: 8px;
+                           color: #333">📊 選択ポート: {{ selected_filename.replace('.csv', '') }} の期間推移</h3>
+                <!-- 4列（または画面幅に応じて調整）で折り返すグリッドコンテナ -->
+             <div class="graph-grid2"
+                     style="display: flex;
+                            flex-wrap: wrap;
+                            gap: 15px;
+                            margin-top: 15px">
+              {% for port in port_list %}
+                <div class="graph-grid"
+                             style="flex: 1 1 calc(10% - 15px);
+                            flex-wrap: wrap;
+                            gap: 15px;
+                            margin-top: 15px">
+			<span>{{port}}</span>
+                    {% for day in target_days %}
+                        <div class="graph-card"
+                             style="flex: 1 1 calc(100% - 15px);
+                                    min-width: 120px;
+                                    background: #fff;
+                                    padding: 12px;
+                                    border-radius: 6px;
+                                    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+                                    border: 1px solid #ddd">
+                            <div style="font-weight: bold;
+                                        font-size: 13px;
+                                        margin-bottom: 8px;
+                                        color: #555;
+                                        border-bottom: 1px dashed #ccc;
+                                        padding-bottom: 4px">
+				    📅 {{ day.formatted }} (<span style="
+					    color:
+					    {%  if day.weekdays_index == 6 %}
+					       red
+					    {%  elif day.weekdays_index == 5 %}
+					       #3366ff
+                                            {% else %}
+                                               black
+                                            {% endif %}
+					    ;" >{{day.weekdays_jp}}</span>)     &ensp;&ensp;{{ start_hour }}:00 ～ {{ end_hour }}:00 
+                            </div>
+                            <!-- mode="single" に固定し、日付パラメータをループ変数（day.yyyymm / day.dd）に差し替え -->
+                            <img src="/plot?base_id={{ selected_base_id }}
+				 &mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd }}&switch={{ selected_switch }}&filename={{ selected_filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ info_dic.get(selected_filename, '') }}"
+                                 alt="{{ day.formatted }} グラフ"
+                                 style="width: 100%;
+                                        height: auto;
+                                        display: block"
+                                 loading="lazy">
+                        </div>
+                    {% endfor %}
+                </div>
+              {% endfor %}
+             </div>
+            </div>
+        {% else %}
+            <div style="padding: 20px;
+                        background: #fffde7;
+                        border: 1px solid #fff59d;
+                        color: #f57f17;
+                        border-radius: 4px">⚠️ 期間（開始日・終了日）、スイッチ、ポートが正しく選択されているか確認してください。</div>
+        {% endif %}
+        <!--
+
+    {% if csv_filenames %}
+    <h2>📊 グラフ一覧 (期間: {{ selected_start_dd }} 〜 {{ selected_end_dd }})</h2>
+    
+    <div class="grid-container">
+        {% for filename in csv_filenames %}
+                    {% set ns = namespace() %}
+                    {% set ns.interface = filename | replace('.csv','') %}
+                    {% set ns.desc = "" %}
+                    
+                    {% if ns.interface in info_dic %}
+                        {% set ns.desc = info_dic[ns.interface].desc %}
+                        {% set ns.speed = info_dic[ns.interface].speed %}
+                    {% endif %}
+
+        <div class="graph-card">
+<img class="graph-img monitor-chart"
+             data-switch="{{ selected_switch }}"
+             data-filename="{{ filename }}"
+             data-desc="{{ ns.desc }}"
+
+
+     src="/plot?base_id={{ selected_base_id }}&mode={{ current_mode }}&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}&switch={{ selected_switch }}&filename={{ filename }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ ns.desc | urlencode }}&speed={{ ns.speed}}"
+     alt="読み込み中..."
+     loading="lazy"
+     width="800"
+     height="300"
+     style="aspect-ratio: 800 / 300; width: 100%; height: auto; background-color: #fdfdfd;">
+
+            <p style="font-size: 14px; margin-top: 10px; font-weight: bold; color: #444;">📁 {{ filename }}</p>
+
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+        <div style="background: #e9edf5; padding: 30px; border-radius: 8px; text-align: center; color: #666;">
+            <p style="font-size: 16px; font-weight: bold; margin: 0;">検索条件を指定してください</p>
+            <p style="font-size: 13px; margin: 5px 0 0 0;">スイッチ名を入力し、調べたい期間の「開始日」と「終了日」を選んでボタンを押してください。</p>
+        </div>
+    {% endif %}
+-->
+
+<script>
+function handleClick(port_list2) {
+    // ボタンがクリックされた時の処理
+	const sl = document.querySelector("#switch_select");
+	const fl = document.querySelector("#filename");
+
+    console.log("アイテムID: " , sl.value, fl.value);
+    //alert("アイテムID: " + sl.value+ fl.value);
+    port_list2.push( { switch: sl.value, port: fl.value} )
+    console.log(port_list2.length)
+}
+</script>
+
+    </body>
+</html>

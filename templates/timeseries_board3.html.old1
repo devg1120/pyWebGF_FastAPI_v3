@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>タイムシリーズボード3</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f5f7fa; color: #333; }
+        .sidebar-form { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { font-weight: bold; display: block; margin-bottom: 5px; }
+        select, input { padding: 6px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+        .btn-submit { background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-submit:hover { background-color: #0056b3; }
+        
+        /* ─── 📊 マトリクス（表）レイアウト用のCSS ─── */
+        .matrix-container { display: flex; flex-direction: column; gap: 25px; margin-top: 20px; }
+        .matrix-row { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .row-header { font-size: 1.1em; font-weight: bold; color: #fff; background-color: #1e293b; padding: 8px 12px; border-radius: 6px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .columns-flex { display: flex; flex-wrap: nowrap; gap: 15px; overflow-x: auto; padding-bottom: 10px; }
+        .matrix-column-card { flex: 1; min-width: 290px; background: #ffffff; border: 1px solid #edf2f7; border-radius: 6px; padding: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }
+        .column-header { font-size: 0.9em; font-weight: bold; border-bottom: 2px solid #4a5568; padding-bottom: 6px; margin-bottom: 10px; color: #2d3748; min-height: 40px; line-height: 1.4; }
+        .graph-image-wrapper { position: relative; text-align: center; background-color: #f7fafc; border-radius: 4px; padding: 4px; }
+        .graph-img { width: 100%; height: auto; border: 1px solid #edf2f7; display: block; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <p><a href="/" style="text-decoration: none;">← 通常モニターに戻る</a></p>
+    <h1>タイムシリーズボード3 📊</h1>
+    <p>📁 現在のデータソース: <code>{{ actual_base_dir }}</code></p>
+
+    <!-- ─── 🛠 設定・検索フォーム ─── -->
+    <div class="sidebar-form">
+        <form action="/timeseries_board3" method="get">
+            <!-- 隠しパラメータ（既存の設定維持用） -->
+            <input type="hidden" name="base_id" value="{{ selected_base_id }}">
+            <input type="hidden" name="logic" value="{{ selected_logic }}">
+
+            <!-- 💡 【統合改修】全スイッチと所属ポートの複数選択マルチセレクトボックス -->
+            <div class="form-group">
+                <label for="target_pairs">比較対象ポート（最大5つまで複数選択可能）:</label>
+                <select id="target_pairs" name="target_pairs" multiple size="10" style="width: 100%; max-width: 550px;">
+                    {% for sw_name in all_switches %}
+                        <optgroup label="■ スイッチ: {{ sw_name }}">
+                            {% for f_name in switch_manifest[sw_name]["ports"] %}
+                                {% set pair_value = sw_name ~ "::" ~ f_name %}
+                                
+                                {# すでに選択中のペアかどうかをチェックするロジック #}
+                                {% set is_selected = False %}
+                                {% for p in selected_pairs %}
+                                    {% if p.raw == pair_value %}
+                                        {% set is_selected = True %}
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                <option value="{{ pair_value }}" {% if is_selected %}selected{% endif %}>
+                                    {{ sw_name }} ── {{ f_name.replace('.csv', '') }}
+                                    {% if switch_manifest[sw_name]["info"].get(f_name) %}
+                                        ({{ switch_manifest[sw_name]["info"].get(f_name) }})
+                                    {% endif %}
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endfor %}
+                </select>
+                <small style="color: #718096; display: block; margin-top: 4px;">
+                    ※ Windows: <b>Ctrl + クリック</b> / Mac: <b>Cmd + クリック</b> で異なるスイッチのポートを跨いで同時に選べます。
+                </small>
+            </div>
+
+            <!-- 📅 期間および時間の指定 -->
+            <div class="form-group" style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <div>
+                    <label>開始日:</label>
+                    <input type="text" name="start_dd" value="{{ selected_start_dd }}" placeholder="例: 2026-10-22" style="width: 110px;">
+                </div>
+                <div>
+                    <label>終了日:</label>
+                    <input type="text" name="end_dd" value="{{ selected_end_dd }}" placeholder="例: 2026-10-23" style="width: 110px;">
+                </div>
+                <div>
+                    <label>開始時刻:</label>
+                    <select name="start_hour">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == start_hour %}selected{% endif %}>{{ h }}:00</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label>終了時刻:</label>
+                    <select name="end_hour">
+                        {% for h in range(0, 24) %}
+                            <option value="{{ h }}" {% if h == end_hour %}selected{% endif %}>{{ h }}:00</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-submit">🔍 選択した構成でマトリクスを描画</button>
+        </form>
+    </div>
+
+    <!-- ─── 📊 グラフ描画エリア（マトリクス展開） ─── -->
+    {% if selected_pairs and target_days %}
+        
+        <!-- 💡 最大5列に合わせるため、CSSで各列カードの最大幅を算出 -->
+        {% set col_count = selected_pairs|length %}
+        {% set max_width_style = "calc(100% / " ~ col_count ~ " - 10px)" %}
+
+        <div class="matrix-container">
+            
+            {# 💡 【外側ループ】 日付別（縦軸・行） #}
+            {% for day in target_days %}
+                <div class="matrix-row">
+                    
+                    <!-- 行の見出し（日付） -->
+                    <div class="row-header">
+                        <span>📅 {{ day.formatted }} ({{ day.weekdays_jp }})</span>
+                        <span style="font-size: 0.85em; font-weight: normal; opacity: 0.9;">表示時間帯: {{ start_hour }}:00 ～ {{ end_hour }}:00</span>
+                    </div>
+
+                    <!-- 💡 【横並びFlex】 ポート別（横軸・列） -->
+                    <div class="columns-flex">
+                        
+                        {# 💡 【内側ループ】 選択されたポート群（列の展開） #}
+                        {% for target in selected_pairs %}
+                            <div class="matrix-column-card" style="max-width: {{ max_width_style }};">
+                                
+                                <!-- 列の見出し（どのスイッチのどのポートか） -->
+                                <div class="column-header">
+                                    <span style="color: #4a5568; font-size: 0.85em;">SW: {{ target.switch }}</span><br>
+                                    <span style="color: #2b6cb0; font-size: 1.05em;">🔗 {{ target.filename.replace('.csv', '') }}</span>
+                                    {% if switch_manifest[target.switch]["info"].get(target.filename) %}
+                                        <br><span style="font-weight: normal; color: #718096; font-size: 0.8em;">({{ switch_manifest[target.switch]["info"].get(target.filename) }})</span>
+                                    {% endif %}
+                                </div>
+
+                                <!-- グラフの呼び出し画像（エラー時のフォールバック処理付き） -->
+                                <div class="graph-image-wrapper">
+                                    <img class="graph-img" 
+                                         src="/plot?base_id={{ selected_base_id }}&mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd_double }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols=3" 
+                                         alt="グラフ" 
+                                         loading="lazy"
+                                         onerror="this.onerror=null; this.src='/plot?base_id={{ selected_base_id }}&mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd_single }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols=3';">
+                                </div>
+
+                            </div>
+                        {% endfor %}
+                        
+                    </div>
+                </div>
+            {% endfor %}
+
+        </div>
+
+    {% else %}
+        <p style="color: #e53e3e; font-weight: bold; background: #fff5f5; padding: 15px; border-radius: 6px; border: 1px solid #fed7d7;">
+            ⚠ 期間（開始日・終了日）を入力し、対象ポートを1つ以上選択して「マトリクスを描画」ボタンを押してください。
+        </p>
+    {% endif %}
+
+    <!-- ─── 🛠 クライアントサイドでの最大5個制御JavaScript ─── -->
+    <script>
+        const selectElement = document.getElementById('target_pairs');
+        selectElement.addEventListener('change', () => {
+            const selectedOptions = Array.from(selectElement.selectedOptions);
+            if (selectedOptions.length > 5) {
+                alert('同時にマトリクス比較できるポートは最大5つまでです。');
+                // 5つを超えて選択しようとした最後の要素を強制的に解除する
+                selectedOptions[selectedOptions.length - 1].selected = false;
+            }
+        });
+    </script>
+</body>
+</html>
+

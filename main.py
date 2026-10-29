@@ -1643,6 +1643,154 @@ async def timeseries_board2(
         },
     )
 
+from typing import Optional, List
+from fastapi import FastAPI, Request, Form, status, Query
+import pandas as pd
+import glob
+import os
+from natsort import natsorted
+import json
+
+# --- 既存のコード（BASE_DIRSやアプリ定義など）はそのまま ---
+
+from typing import Optional, List
+from fastapi import FastAPI, Request, Form, status, Query
+import pandas as pd
+import glob
+import os
+from natsort import natsorted
+import json
+
+# --- 既存のアプリ定義やBASE_DIRSなどはそのまま残してください ---
+
+@app.get("/timeseries_board3", response_class=HTMLResponse)
+async def timeseries_board3(
+    request: Request,
+    base_id: Optional[str] = None,
+    start_dd: str = "",
+    end_dd: str = "",
+    logic: str = "stat_threshold",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    if not base_id:
+        base_id = get_default_base_id()
+    actual_base = get_base_dir_path(base_id)
+    date_tree = get_date_tree(base_id)
+
+    if start_dd:
+        start_dd = start_dd.replace("/", "-")  # YYYY-MM-DD 形式に統一
+    if end_dd:
+        end_dd = end_dd.replace("/", "-")
+
+    # ─── 1. 選択肢をスキャンするためのフォルダ探索（既存ロジック） ───
+    scan_date_dirs = []
+    if start_dd:
+        try:
+            # pd.to_datetime はハイフン区切り(YYYY-MM-DD)を自動で正しくパースしてくれます
+            p_date = pd.to_datetime(start_dd)
+            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")))
+            scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day)))
+        except:
+            pass
+    
+    # 期間指定がない場合や補完のため、最新のデータ構造を直近5日分スキャン
+    for ym, dds in reversed(list(date_tree.items())):
+        for d in reversed(dds):
+            scan_date_dirs.append(os.path.join(actual_base, ym, d))
+            if len(scan_date_dirs) > 5:
+                break
+
+    # ─── 2. データソース内の「全スイッチ ✕ 全ポート」構造をスキャンしてカタログ化 ───
+    full_switch_manifest = {}
+    for d_dir in scan_date_dirs:
+        if os.path.exists(d_dir):
+            sw_dirs = [d for d in glob.glob(os.path.join(d_dir, "*")) if os.path.isdir(d)]
+            for s_path in sw_dirs:
+                sw_name = os.path.basename(s_path)
+                if sw_name not in full_switch_manifest:
+                    full_switch_manifest[sw_name] = {"ports": set(), "info": {}}
+                
+                csv_files = glob.glob(os.path.join(s_path, "*.csv"))
+                for c_file in csv_files:
+                    full_switch_manifest[sw_name]["ports"].add(os.path.basename(c_file))
+                
+                info_json_path = os.path.join(s_path, "info.json")
+                if os.path.exists(info_json_path):
+                    try:
+                        with open(info_json_path, "r", encoding="utf-8") as f:
+                            full_switch_manifest[sw_name]["info"].update(json.load(f))
+                    except:
+                        pass
+
+    all_switches = sorted(list(full_switch_manifest.keys()))
+    for sw_name in full_switch_manifest:
+        full_switch_manifest[sw_name]["ports"] = natsorted(list(full_switch_manifest[sw_name]["ports"]))
+
+    # ─── 3. クエリパラメータ（target_pairs）から複数選択された値をパース ───
+    raw_targets = request.query_params.getlist("target_pairs")
+    
+    selected_pairs = []
+    for rt in raw_targets:
+        if "::" in rt:
+            sw_part, fn_part = rt.split("::", 1)
+            selected_pairs.append({"switch": sw_part, "filename": fn_part, "raw": rt})
+            
+    # 最大5ポートまでに制限
+    selected_pairs = selected_pairs[:5]
+
+    # デフォルトの初期選択状態（何も選ばれていない場合）
+    #if not selected_pairs and all_switches:
+    #    first_sw = all_switches[0]
+    #    first_ports = full_switch_manifest[first_sw]["ports"]
+    #    if first_ports:
+    #        selected_pairs.append({
+    #            "switch": first_sw, 
+    #            "filename": first_ports[0], 
+    #            "raw": f"{first_sw}::{first_ports[0]}"
+    #        })
+
+    # ─── 4. 指定された期間内の日付リストを生成 ───
+    target_days = []
+    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
+    if start_dd and end_dd:
+        try:
+            date_range = pd.date_range(start=start_dd, end=end_dd)
+            for d in date_range:
+                ym_dir = d.strftime("%Y%m")
+                d_double = d.strftime("%d")
+                d_single = str(d.day)
+
+                target_days.append({
+                    "yyyymm": ym_dir,
+                    "dd_double": d_double,
+                    "dd_single": d_single,
+                    "formatted": d.strftime("%Y-%m-%d"),
+                    "weekdays_jp": weekdays_jp[d.weekday()],
+                })
+        except Exception as e:
+            print(f"日付リスト生成エラー: {e}")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="timeseries_board3.html",
+        context={
+            "base_ids": list(BASE_DIRS.keys()),
+            "selected_base_id": base_id,
+            "actual_base_dir": actual_base,
+            "date_tree": date_tree,
+            "all_switches": all_switches,
+            "switch_manifest": full_switch_manifest,
+            "selected_pairs": selected_pairs,
+            "selected_start_dd": start_dd,
+            "selected_end_dd": end_dd,
+            "logics": AnomalyDetectors.get_available_logics(),
+            "selected_logic": logic,
+            "start_hour": int(start_hour),
+            "end_hour": int(end_hour),
+            "target_days": target_days,
+        },
+    )
 
 if __name__ == "__main__":
     import uvicorn
