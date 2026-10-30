@@ -2194,6 +2194,17 @@ async def timeseries_board5(
             "target_days": target_days,
         },
     )
+
+@app.get("/snapshots", response_class=HTMLResponse)
+async def snapshots_page(request: Request):
+    """一時保存したスナップショットを一覧表示・PDF化する専用ページ"""
+    return templates.TemplateResponse(
+        request=request,
+        name="snapshots.html",
+        context={}
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 
