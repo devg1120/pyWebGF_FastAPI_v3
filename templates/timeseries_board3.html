@@ -51,11 +51,15 @@
                             <span>📌 現在の選択ポート一覧</span>
                             <span id="badge_count" style="color: #2b6cb0;">{{ selected_pairs|length }} / 5 件選択中</span>
                         </div>
-                        <div id="badge_list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <div id="badge-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
                             {% if selected_pairs %}
                                 {% for p in selected_pairs %}
                                     <span class="port-badge"
                                           data-raw="{{ p.raw }}"
+              draggable="true" 
+              ondragstart="handleDragStart(event)"
+              ondragover="handleDragOver(event)"
+              ondragend="handleDragEnd(event)"
                                           style="display: inline-flex;
                                                  align-items: center;
                                                  background-color: #3182ce;
@@ -85,36 +89,80 @@
                             {% endif %}
                         </div>
                     </div>
+<div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ddd;">
+    <h4 style="margin-top: 0;">🔌 ポートを追加選択（2階層セレクタ）</h4>
+    
+    <!-- 💡 1階層目：スイッチ選択セレクタ -->
+    <label style="font-weight: bold; margin-right: 10px;">① スイッチ:</label>
+    <select id="parent-switch-select" onchange="updatePortSelect()" style="padding: 6px; min-width: 150px; margin-right: 20px;">
+        <option value="">-- スイッチを選択 --</option>
+        {% for sw_name in all_switches %}
+            <option value="{{ sw_name }}">{{ sw_name }}</option>
+        {% endfor %}
+    </select>
+
+    <!-- 💡 2階層目：ポート選択セレクタ（初期状態は空、スイッチ選択で動的に変化） -->
+    <label style="font-weight: bold; margin-right: 10px;">② ポート:</label>
+    <select id="child-port-select" style="padding: 6px; min-width: 200px; margin-right: 20px;" disabled>
+        <option value="">-- 先にスイッチを選択してください --</option>
+    </select>
+
+    <!-- 💡 追加ボタン -->
+    <button type="button" onclick="addSelectedPortPair()" style="background-color: #28a745; color: white; padding: 6px 15px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">
+        ＋ 選択を追加
+    </button>
+</div>
+<!--
                     <select id="target_pairs"
                             name="target_pairs"
                             multiple
                             size="10"
                             style="width: 100%;
                                    max-width: 550px">
+                        {# 💡 選択肢リスト部分のループ処理内 #}
                         {% for sw_name in all_switches %}
-                            <optgroup label="■ スイッチ: {{ sw_name }}">
-                                {% for f_name in switch_manifest[sw_name]["ports"] %}
-                                    {% set pair_value = sw_name ~ "::" ~ f_name %}
-                                    {# すでに選択中のペアかどうかをチェックするロジック #}
-                                    {% set is_selected = False %}
-                                    {% for p in selected_pairs %}
-                                        {% if p.raw == pair_value %}
-                                            {% set is_selected = True %}
-                                        {% endif %}
-                                    {% endfor %}
-                                    <option value="{{ pair_value }}" {% if is_selected %}selected{% endif %}>
-                                        {{ sw_name }} ── {{ f_name.replace('.csv', '') }}
-                                        {% if switch_manifest[sw_name]["info"].get(f_name) %}
-                                            ({{ switch_manifest[sw_name]["info"].get(f_name) }})
-                                        {% endif %}
-                                    </option>
+                            {% for f_name in switch_manifest[sw_name]["ports"] %}
+                                {% set pair_value = sw_name ~ "::" ~ f_name %}
+                                {# すでに選択中のペアかどうかをチェックするロジック #}
+                                {% set is_selected = False %}
+                                {% for p in selected_pairs %}
+                                    {% if p.raw == pair_value %}
+                                        {% set is_selected = True %}
+                                    {% endif %}
                                 {% endfor %}
-                            </optgroup>
+                                <div style="margin: 5px 0;">
+                                    {% if is_selected %}
+                                        {# すでに選ばれているポートは、視覚的に判別できるようにするか、クリックで解除できるようにURLを構成します #}
+                                        <span style="color: #888888; font-weight: bold;">✅ {{ sw_name }} ── {{ f_name.replace('.csv', '') }} (選択中)</span>
+                                    {% else %}
+                                        {# 💡 【ここが重要】新しくポートを追加するためのURLパラメータの組み立て #}
+                                        {% set add_query_parts = ["base_id=" ~ selected_base_id, "start_dd=" ~ selected_start_dd, "end_dd=" ~ selected_end_dd, "logic=" ~ selected_logic, "start_hour=" ~ start_hour, "end_hour=" ~ end_hour] %}
+                                        {# 現在すでに選択されているバッジ群をすべて引き継ぐ #}
+                                        {% for p in selected_pairs %}
+                                            {% set _ = add_query_parts.append("target_pairs=" ~ p.raw) %}
+                                        {% endfor %}
+                                        {# 今回新しくクリックしたポートも末尾に追加する #}
+                                        {% set _ = add_query_parts.append("target_pairs=" ~ pair_value) %}
+                                        {# 最大5件までの時のみリンクを有効化する制御 #}
+                                        {% if selected_pairs|length < 5 %}
+                                            🔌 <a href="/timeseries_board3?{{ add_query_parts|join("&") }}"
+    style="text-decoration: none;
+           color: #0066cc">{{ sw_name }} ── {{ f_name.replace('.csv', '') }}</a>
+                                        {% else %}
+                                            🔌 <span style="color: #aaa;" title="最大5ポートまで選択可能です">{{ sw_name }} ── {{ f_name.replace('.csv', '') }} (上限5件)</span>
+                                        {% endif %}
+                                    {% endif %}
+                                    {% if switch_manifest[sw_name]["info"].get(f_name) %}
+                                        <small style="color: #666">({{ switch_manifest[sw_name]["info"].get(f_name) }})</small>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
                         {% endfor %}
                     </select>
                     <small style="color: #718096; display: block; margin-top: 4px;">
                         ※ Windows: <b>Ctrl + クリック</b> / Mac: <b>Cmd + クリック</b> で異なるスイッチのポートを跨いで同時に選べます。
                     </small>
+-->
                 </div>
                 <!-- 📅 期間および時間の指定 -->
                 <!-- 📅 期間および時間の指定（カレンダーピッカー版） -->
@@ -159,7 +207,27 @@
                         </select>
                     </div>
                 </div>
-                <button type="submit" class="btn-submit">🔍 選択した構成でマトリクスを描画</button>
+                <div style="margin: 20px 0;">
+                    {# 💡 現在選択中のバッジ（ポート群）を確実にJavaScriptへ引き渡す #}
+                    <script>
+        const CURRENT_SELECTED_PAIRS = [
+            {% for p in selected_pairs %}
+                "{{ p.raw }}"{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+                    </script>
+                    {# 👇 描画ボタン本体 #}
+                    <button type="button"
+                            onclick="executeMatrixForm()"
+                            style="background-color: #007bff;
+                                   color: white;
+                                   padding: 12px 24px;
+                                   border: none;
+                                   border-radius: 4px;
+                                   font-weight: bold;
+                                   cursor: pointer;
+                                   font-size: 15px">🔍 選択した構成でマトリクスを描画</button>
+                </div>
             </form>
         </div>
         <!-- ─── 📊 グラフ描画エリア（マトリクス展開） ─── -->
@@ -218,6 +286,7 @@
         {% endif %}
         <!-- ─── 🛠 クライアントサイドでの最大5個制御JavaScript ─── -->
         <script>
+		/*
         const selectElement = document.getElementById('target_pairs');
         selectElement.addEventListener('change', () => {
             const selectedOptions = Array.from(selectElement.selectedOptions);
@@ -227,13 +296,14 @@
                 selectedOptions[selectedOptions.length - 1].selected = false;
             }
         });
+	       */
         </script>
         <!-- ─── 🛠 リアルタイムバッジ連動＆最大5個制限JavaScript ─── -->
         <!-- ─── 🛠 【衝突対策版】リアルタイムバッジ連動JavaScript ─── -->
         <script>
     // 💡 変数名を他と絶対衝突しない「tsBoardSelect」などに一斉変更します
     const tsBoardSelect = document.getElementById('target_pairs');
-    const badgeList = document.getElementById('badge_list');
+    const badgeList = document.getElementById('badge-container');
     const badgeCount = document.getElementById('badge_count');
 
     if (tsBoardSelect) {
@@ -278,7 +348,7 @@
     }
 
     // 💡 バッジの「×」をクリックしたときに、セレクトボックス側の選択を解除する関数
-    function removePort(rawValue) {
+    function removePort___(rawValue) {
         if (!tsBoardSelect) return;
         for (let i = 0; i < tsBoardSelect.options.length; i++) {
             if (tsBoardSelect.options[i].value === rawValue) {
@@ -289,6 +359,274 @@
         // 変更イベントを手動で発生させてバッジ表示を再同期
         tsBoardSelect.dispatchEvent(new Event('change'));
     }
+
+
+function removePort(rawTargetValue) {
+    // 1. 画面内のポート選択用要素（<select>など）を探す
+    // ※実際のHTML構造に合わせて、nameやidを適宜調整してください。
+    // ここでは、name="target_pairs" の複数選択セレクトボックス、または同一nameのチェックボックスを想定しています。
+    const selectors = document.querySelectorAll('[name="target_pairs"]');
+    
+    selectors.forEach(el => {
+        if (el.tagName === 'SELECT') {
+            // <select multiple> の場合の解除処理
+            Array.from(el.options).forEach(opt => {
+                if (opt.value === rawTargetValue) {
+                    opt.selected = false;
+                }
+            });
+        } else if (el.type === 'checkbox' || el.type === 'radio') {
+            // チェックボックス形式だった場合の解除処理
+            if (el.value === rawTargetValue) {
+                el.checked = false;
+            }
+        }
+    });
+
+    // 2. 現在のURLのクエリパラメータを取得し、削除対象（target_pairs）だけを除外して再構築
+    const currentUrl = new URL(window.location.href);
+    const params = new URLSearchParams(currentUrl.search);
+    
+    // 一度 target_pairs のパラメータをすべてクリアする
+    const allPairs = params.getAll('target_pairs');
+    params.delete('target_pairs');
+    
+    // 削除対象以外のポートだけをクエリパラメータに再登録
+    allPairs.forEach(pair => {
+        if (pair !== rawTargetValue) {
+            params.append('target_pairs', pair);
+        }
+    });
+
+    // 3. 新しいURLに遷移して画面をリロード（マトリクス描画なども連動して最新状態になります）
+    window.location.href = currentUrl.pathname + '?' + params.toString();
+}
         </script>
+        <script>
+function executeMatrixForm() {
+    const newParams = new URLSearchParams();
+    const urlParams = new URLSearchParams(window.location.search);
+
+    // 1. 基本パラメータの設定（URLにない場合はJinja2の初期値をセット）
+    const base_id = urlParams.get('base_id') || "{{ selected_base_id }}";
+    const logic = urlParams.get('logic') || "{{ selected_logic }}";
+    newParams.set('base_id', base_id);
+    newParams.set('logic', logic);
+
+    // 2. 💡 画面上のすべての入力要素（日付・時刻）を、属性や登場順から超厳密に特定して取得
+    
+    // 日付入力欄 (input[type="date"]) をすべて取得
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    let start_dd = "";
+    let end_dd = "";
+
+    if (dateInputs.length >= 2) {
+        // 画面に日付欄が2つ以上ある場合、1つ目を開始日、2つ目を終了日とする
+        start_dd = dateInputs[0].value;
+        end_dd = dateInputs[1].value;
+    } else if (dateInputs.length === 1) {
+        start_dd = dateInputs[0].value;
+        end_dd = urlParams.get('end_dd') || "{{ selected_end_dd }}";
+    } else {
+        // 万が一、input要素自体が見つからない場合のセーフティ
+        start_dd = urlParams.get('start_dd') || "{{ selected_start_dd }}";
+        end_dd = urlParams.get('end_dd') || "{{ selected_end_dd }}";
+    }
+
+    // セレクトボックス (時刻) をすべて取得
+    const selectBoxes = document.querySelectorAll('select');
+    let start_hour = "";
+    let end_hour = "";
+
+    // 画面内の全セレクトボックスのうち、Jinja2のループで24時間（0〜23）が埋め込まれているものを特定
+    const hourSelects = Array.from(selectBoxes).filter(sb => sb.options.length >= 24);
+
+    if (hourSelects.length >= 2) {
+        // 2つ以上見つかれば、1つ目を開始時刻、2つ目を終了時刻とする
+        start_hour = hourSelects[0].value;
+        end_hour = hourSelects[1].value;
+    } else {
+        start_hour = urlParams.get('start_hour') || "{{ start_hour }}";
+        end_hour = urlParams.get('end_hour') || "{{ end_hour }}";
+    }
+
+    // 3. 値が空にリセットされないよう、最終ガードをかけてパラメータにセット
+    newParams.set('start_dd', start_dd || "{{ selected_start_dd }}");
+    newParams.set('end_dd', end_dd || "{{ selected_end_dd }}");
+    newParams.set('start_hour', start_hour || "{{ start_hour }}");
+    newParams.set('end_hour', end_hour || "{{ end_hour }}");
+
+    // 4. 【最重要】選択されていたバッジ（ポート）をすべて結合
+    if (typeof CURRENT_SELECTED_PAIRS !== 'undefined' && CURRENT_SELECTED_PAIRS.length > 0) {
+        CURRENT_SELECTED_PAIRS.forEach(pair => {
+            newParams.append('target_pairs', pair);
+        });
+    }
+
+    // 5. 新しいURLに遷移してマトリクスを描画
+    window.location.href = window.location.pathname + '?' + newParams.toString();
+}
+        </script>
+
+<script>
+// 💡 Jinja2の辞書オブジェクトをJavaScriptのオブジェクトとして安全にダンプ
+const SWITCH_MANIFEST = {
+    {% for sw_name, sw_info in switch_manifest.items() %}
+        "{{ sw_name }}": {
+            "ports": [
+                {% for port in sw_info.ports %}
+                    "{{ port }}"{% if not loop.last %},{% endif %}
+                {% endfor %}
+            ]
+        }{% if not loop.last %},{% endif %}
+    {% endfor %}
+};
+
+// 💡 1階層目（スイッチ）が変わったときに、2階層目（ポート）の中身を書き換える関数
+function updatePortSelect() {
+    const switchSelect = document.getElementById('parent-switch-select');
+    const portSelect = document.getElementById('child-port-select');
+    const selectedSwitch = switchSelect.value;
+
+    // 一度ポートの選択肢をクリア
+    portSelect.innerHTML = '';
+
+    if (!selectedSwitch || !SWITCH_MANIFEST[selectedSwitch]) {
+        portSelect.innerHTML = '<option value="">-- 先にスイッチを選択してください --</option>';
+        portSelect.disabled = true;
+        return;
+    }
+
+    // 選択されたスイッチに属するポート一覧を取得してオプションを生成
+    const ports = SWITCH_MANIFEST[selectedSwitch].ports;
+    
+    if (ports.length === 0) {
+        portSelect.innerHTML = '<option value="">CSVポートデータがありません</option>';
+        portSelect.disabled = true;
+    } else {
+        // デフォルトの案内表示
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = "";
+        defaultOpt.textContent = `-- ポートを選択 (${ports.length}件) --`;
+        portSelect.appendChild(defaultOpt);
+
+        // 各ポートを登録
+        ports.forEach(port => {
+            const opt = document.createElement('option');
+            opt.value = port;
+            // .csv 拡張子を除いて見やすく表示
+            opt.textContent = port.replace('.csv', '');
+            portSelect.appendChild(opt);
+        });
+        portSelect.disabled = false;
+    }
+}
+
+// 💡 「＋ 選択を追加」ボタンを押したときに、既存のバッジ群に合流させて画面をリロードする関数
+function addSelectedPortPair() {
+    const switchSelect = document.getElementById('parent-switch-select');
+    const portSelect = document.getElementById('child-port-select');
+    
+    const sw = switchSelect.value;
+    const port = portSelect.value;
+
+    if (!sw || !port) {
+        alert("スイッチとポートの両方を選択してください。");
+        return;
+    }
+
+    // サーバーが受け取れる「スイッチ::ポート.csv」の形式を生成
+    const newRawValue = sw + "::" + port;
+
+    // 既存のURLパラメータを解析・引き継ぎ
+    const currentUrl = new URL(window.location.href);
+    const params = new URLSearchParams(currentUrl.search);
+    
+    // 現在すでに選ばれているtarget_pairs（バッジ）をリストで取得
+    const currentPairs = params.getAll('target_pairs');
+    
+    // 重複チェック
+    if (currentPairs.includes(newRawValue)) {
+        alert("このポートはすでに選択（追加）されています。");
+        return;
+    }
+    
+    // 上限5件チェック
+    if (currentPairs.length >= 5) {
+        alert("同時選択は最大5ポートまでです。先に既存のバッジを削除してください。");
+        return;
+    }
+
+    // パラメータに新しいペアを蓄積して画面をリロード
+    params.append('target_pairs', newRawValue);
+    window.location.href = currentUrl.pathname + '?' + params.toString();
+}
+</script>
+<script>
+let draggedElement = null;
+
+// ドラッグ開始時
+function handleDragStart(e) {
+    draggedElement = e.currentTarget;
+    e.currentTarget.style.opacity = '0.5';
+    e.currentTarget.style.cursor = 'grabbing';
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+// ドラッグ中（他のバッジの上を通過時）
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    
+    const targetBadge = e.currentTarget;
+    const container = targetBadge.parentElement;
+    
+    if (container && targetBadge && targetBadge !== draggedElement) {
+        const rect = targetBadge.getBoundingClientRect();
+        const nextTarget = (e.clientX - rect.left) / (rect.right - rect.left) > 0.5;
+        container.insertBefore(draggedElement, nextTarget ? targetBadge.nextSibling : targetBadge);
+    }
+}
+
+// ドラッグ終了（マウスを離した瞬間）
+function handleDragEnd(e) {
+    e.currentTarget.style.opacity = '1';
+    e.currentTarget.style.cursor = 'grab';
+    
+    // 💡 掴んでいたバッジの親要素に存在する、すべての「data-raw」属性を持つ要素を強制回収
+    if (!e.currentTarget || !e.currentTarget.parentElement) return;
+    const container = e.currentTarget.parentElement;
+    
+    // クラス名に依存せず、[data-raw] という属性がついている要素から順番に値を引っこ抜く
+    const badgeElements = container.querySelectorAll('[data-raw]');
+    const newOrderPairs = Array.from(badgeElements).map(el => el.getAttribute('data-raw')).filter(Boolean);
+    
+    // 万が一、読み込みに失敗した場合はリロードを走らせずにガードする（バッジが消えるのを防止）
+    if (newOrderPairs.length === 0) {
+        console.error("バッジ要素のデータ回収に失敗したため、処理を中断しました。");
+        return;
+    }
+
+    // URLパラメータの組み換え処理
+    const currentUrl = new URL(window.location.href);
+    const params = new URLSearchParams(currentUrl.search);
+    
+    // 古い順序を一旦クリアして新しい順序で再append
+    params.delete('target_pairs');
+    newOrderPairs.forEach(pair => {
+        params.append('target_pairs', pair);
+    });
+    
+    // グラフとバッジを最新の順番でリロード同期
+    window.location.href = currentUrl.pathname + '?' + params.toString();
+}
+
+</script>
+}
+
+
+</script>
+
+
     </body>
 </html>
