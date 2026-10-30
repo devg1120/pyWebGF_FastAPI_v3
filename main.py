@@ -1767,6 +1767,7 @@ async def timeseries_board3(
                     "dd_single": d_single,
                     "formatted": d.strftime("%Y-%m-%d"),
                     "weekdays_jp": weekdays_jp[d.weekday()],
+                    "weekdays_index": d.weekday(),
                 })
         except Exception as e:
             print(f"日付リスト生成エラー: {e}")

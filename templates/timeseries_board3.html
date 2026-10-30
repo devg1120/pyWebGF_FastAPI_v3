@@ -13,11 +13,12 @@
         .btn-submit:hover { background-color: #0056b3; }
         
         /* ─── 📊 マトリクス（表）レイアウト用のCSS ─── */
-        .matrix-container { display: flex; flex-direction: column; gap: 25px; margin-top: 20px; }
-        .matrix-row { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .matrix-container { display: flex; flex-direction: column; gap: 5px; margin-top: 20px; }
+        .date {  padding: 26px 10px 0px 0px;  }
+        .matrix-row { background: #fff; border: 1px solid #e2e8f0; border-radius: 0px; padding: 2px 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
         .row-header { font-size: 1.1em; font-weight: bold; color: #fff; background-color: #1e293b; padding: 8px 12px; border-radius: 6px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .columns-flex { display: flex; flex-wrap: nowrap; gap: 15px; overflow-x: auto; padding-bottom: 10px; }
-        .matrix-column-card { flex: 1; min-width: 290px; background: #ffffff; border: 1px solid #edf2f7; border-radius: 6px; padding: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }
+        .columns-flex { display: flex; flex-wrap: nowrap; gap: 15px; overflow-x: auto; padding-bottom: 0px; }
+        .matrix-column-card { flex: 1; min-width: 290px; background: #ffffff; border: 1px solid #edf2f7; border-radius: 0px; padding: 0px; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }
         .column-header { font-size: 0.9em; font-weight: bold; border-bottom: 2px solid #4a5568; padding-bottom: 6px; margin-bottom: 10px; color: #2d3748; min-height: 40px; line-height: 1.4; }
         .graph-image-wrapper { position: relative; text-align: center; background-color: #f7fafc; border-radius: 4px; padding: 4px; }
         .graph-img { width: 100%; height: auto; border: 1px solid #edf2f7; display: block; border-radius: 4px; }
@@ -240,15 +241,31 @@
                 {% for day in target_days %}
                     <div class="matrix-row">
                         <!-- 行の見出し（日付） -->
+			<!--
                         <div class="row-header">
                             <span>📅 {{ day.formatted }} ({{ day.weekdays_jp }})</span>
                             <span style="font-size: 0.85em;
                                          font-weight: normal;
                                          opacity: 0.9">表示時間帯: {{ start_hour }}:00 ～ {{ end_hour }}:00</span>
                         </div>
+			-->
                         <!-- 💡 【横並びFlex】 ポート別（横軸・列） -->
                         <div class="columns-flex">
                             {# 💡 【内側ループ】 選択されたポート群（列の展開） #}
+			    <!--
+                            <span class="date" >{{ day.formatted }} ({{ day.weekdays_jp }})</span>
+			    -->
+                            <span class="date" >{{ day.formatted }} (<span style="
+					    color:
+					    {%  if day.weekdays_index == 6 %}
+					       red
+					    {%  elif day.weekdays_index == 5 %}
+					       #3366ff
+                                            {% else %}
+                                               black
+                                            {% endif %}
+					    ;" >{{day.weekdays_jp}}</span>)
+			    </span>
                             {% for target in selected_pairs %}
                                 <div class="matrix-column-card" style="max-width: {{ max_width_style }};">
                                     <!-- 列の見出し（どのスイッチのどのポートか） -->
@@ -256,19 +273,36 @@
                                         <span style="color: #4a5568; font-size: 0.85em;">SW: {{ target.switch }}</span>
                                         <br>
                                         <span style="color: #2b6cb0;
-                                                     font-size: 1.05em">🔗 {{ target.filename.replace('.csv', '') }}</span>
-                                        {% if switch_manifest[target.switch]["info"].get(target.filename) %}
-                                            <br>
-                                            <span style="font-weight: normal; color: #718096; font-size: 0.8em;">({{ switch_manifest[target.switch]["info"].get(target.filename) }})</span>
-                                        {% endif %}
+                                                     font-size: 1.05em">{{ target.filename.replace('.csv', '') }}</span>
+       {% set port_key = target.filename.replace('.csv', '') %}
+        {# 💡 辞書からポート名キーで直接取得 #}
+        {% set port_info = switch_manifest[target.switch]["info"][port_key] if port_key in switch_manifest[target.switch]["info"] else none %}
+        
+        {% if port_info is not none %}
+            {# 💡 辞書型（dict）かオブジェクト型かどちらでも安全に参照できるよう両方の構文でフォールバック #}
+            {% set p_desc = port_info.desc if port_info.desc is defined else port_info.get('desc') if port_info.get is defined else '' %}
+            {% set p_speed = port_info.speed if port_info.speed is defined else port_info.get('speed') if port_info.get is defined else '' %}
+            
+            {% if p_desc %}<span style="color: #555; font-size: 0.9em;">({{ p_desc }})</span>{% endif %}
+            {% if p_speed %}<span style="background: #e0e0e0; padding: 2px 5px; font-size: 0.8em; border-radius: 3px; margin-left: 5px;">{{ p_speed | int // 1000 }}Gbps</span>{% endif %}
+        {% endif %}
                                     </div>
                                     <!-- グラフの呼び出し画像（エラー時のフォールバック処理付き） -->
                                     <div class="graph-image-wrapper">
+   {% set g_desc = p_desc if p_desc is defined else "" %}
+    {% set g_speed = p_speed if p_speed is defined else "" %}
+<!--
                                         <img class="graph-img"
                                              src="/plot?base_id={{ selected_base_id }}&mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd_double }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols=3"
                                              alt="グラフ"
                                              loading="lazy"
                                              onerror="this.onerror=null; this.src='/plot?base_id={{ selected_base_id }}&mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd_single }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols=3';">
+-->
+
+    <img src="/plot?base_id={{ selected_base_id }}&mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd_double }}&switch={{ target.switch }}&filename={{ target.filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ g_desc | urlencode }}&speed={{ g_speed }}" 
+         alt="グラフ" 
+         style="width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px;">
+
                                     </div>
                                 </div>
                             {% endfor %}
