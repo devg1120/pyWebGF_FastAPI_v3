@@ -10,17 +10,24 @@
         .btn-pdf { background-color: #007bff; color: white; }
         .btn-clear { background-color: #dc3545; color: white; }
         
+        /* 操作用ミニボタンのスタイル */
+        .action-bar { display: flex; gap: 5px; margin-bottom: 10px; }
+        .btn-sm { padding: 4px 8px; font-size: 0.85em; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; background: #fff; font-weight: bold; }
+        .btn-sm:hover { background: #f0f0f0; }
+        .btn-del { color: #dc3545; border-color: #dc3545; }
+        .btn-del:hover { background: #fff5f5; }
+
         /* グラフ一覧のレイアウト */
         .snapshot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-        .snapshot-card { background: white; border: 1px solid #ccc; padding: 15px; border-radius: 6px; page-break-inside: avoid; }
-        .snapshot-card h3 { margin-top: 0; font-size: 1.1em; color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px; }
-        .snapshot-card img { width: 100%; height: auto; }
+        .snapshot-card { background: white; border: 1px solid #ccc; padding: 15px; border-radius: 6px; page-break-inside: avoid; display: flex; flex-direction: column; }
+        .snapshot-card h3 { margin-top: 0; font-size: 1.1em; color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-bottom: 10px; }
+        .snapshot-card img { width: 100%; height: auto; margin-top: auto; }
         
         /* 💡 PDF・印刷用の最適化設定 */
         @media print {
             .no-print { display: none !important; }
             body { background: white; padding: 0; }
-            .snapshot-grid { display: block; } /* 印刷時は縦並び、または綺麗に収まるように変更可能 */
+            .snapshot-grid { display: block; }
             .snapshot-card { margin-bottom: 30px; border: none; padding: 0; page-break-inside: avoid; }
         }
     </style>
@@ -30,10 +37,10 @@
     <!-- 印刷時に非表示にする操作ナビゲーションパネル -->
     <div class="no-print">
         <h2>📸 スナップショット管理パネル</h2>
-        <p>メインページで一時保存したトラフィックグラフの一覧です。PDF化したい場合は「PDF・印刷を出力」を押してください。</p>
+        <p>一時保存したトラフィックグラフの一覧です。並び替えや個別削除を行ってからPDF化できます。</p>
         <button class="btn btn-pdf" onclick="window.print()">📄 PDF・印刷を出力する</button>
-        <button class="btn btn-clear" onclick="clearSnapshots()">🗑️ リストを全削除</button>
-        <a href="/" style="color: #007bff; text-decoration: none; margin-left: 15px;">← メインモニターへ戻る</a>
+        <button class="btn btn-clear" onclick="clearAllSnapshots()">🗑️ リストを全削除</button>
+        <a href="/" style="color: #007bff; text-decoration: none; margin-left: 15px; font-weight: bold;">← メインモニターへ戻る</a>
     </div>
 
     <!-- グラフ表示領域 -->
@@ -43,12 +50,16 @@
 
     <script>
         // ページ読み込み時にLocalStorageからデータをロードして描画
-        document.addEventListener("DOMContentLoaded", function() {
+        document.addEventListener("DOMContentLoaded", loadSnapshots);
+
+        function loadSnapshots() {
             const container = document.getElementById('snapshot-container');
+            container.innerHTML = ''; // 一旦クリア
+            
             const snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
             
             if (snapshots.length === 0) {
-                container.innerHTML = '<p class="no-print" style="color:red; font-weight:bold;">一時保存されたスナップショットはありません。</p>';
+                container.innerHTML = '<p class="no-print" style="color:#666; font-style:italic;">一時保存されたスナップショットはありません。</p>';
                 return;
             }
             
@@ -56,22 +67,58 @@
                 const card = document.createElement('div');
                 card.className = 'snapshot-card';
                 card.innerHTML = `
-                    <h3>📊 ポート: ${item.interface} <span style="font-size:0.8em; font-weight:normal; color:#666;">${item.desc ? ' - ' + item.desc : ''}</span></h3>
+                    <h3>📊 ポート: ${item.interface} <span style="font-size:0.85em; font-weight:normal; color:#666;">${item.desc ? ' - ' + item.desc : ''}</span></h3>
+                    
+                    <!-- 💡 追加: 印刷時には消える操作バー -->
+                    <div class="action-bar no-print">
+                        <button class="btn-sm" onclick="moveSnapshot(${index}, -1)" ${index === 0 ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>▲ 上へ</button>
+                        <button class="btn-sm" onclick="moveSnapshot(${index}, 1)" ${index === snapshots.length - 1 ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>▼ 下へ</button>
+                        <button class="btn-sm btn-del" onclick="deleteSnapshot(${index})">❌ 削除</button>
+                    </div>
+
                     <img src="${item.imgSrc}" alt="グラフ">
-                    <div style="font-size: 0.8em; color: #999; margin-top: 5px; text-align: right;" class="no-print">保存日時: ${item.timestamp}</div>
+                    <div style="font-size: 0.8em; color: #999; margin-top: 8px; text-align: right;" class="no-print">保存日時: ${item.timestamp}</div>
                 `;
                 container.appendChild(card);
             });
-        });
+        }
 
-        // データを全削除
-        function clearSnapshots() {
+        // 💡 1. 順番並び替えロジック
+        function moveSnapshot(index, direction) {
+            let snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
+            const targetIndex = index + direction;
+            
+            // 境界チェック
+            if (targetIndex < 0 || targetIndex >= snapshots.length) return;
+            
+            // 要素の入れ替え（スワップ）
+            const temp = snapshots[index];
+            snapshots[index] = snapshots[targetIndex];
+            snapshots[targetIndex] = temp;
+            
+            localStorage.setItem('traffic_snapshots', JSON.stringify(snapshots));
+            loadSnapshots(); // 再描画
+        }
+
+        // 💡 2. 個別削除ロジック
+        function deleteSnapshot(index) {
+            let snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
+            const targetName = snapshots[index].interface;
+            
+            if (confirm(`[${targetName}] のスナップショットを削除しますか？`)) {
+                snapshots.splice(index, 1); // 指定インデックスの要素を1つ削除
+                localStorage.setItem('traffic_snapshots', JSON.stringify(snapshots));
+                loadSnapshots(); // 再描画
+            }
+        }
+
+        // 3. データを全削除
+        function clearAllSnapshots() {
             if (confirm('一時保存されているスナップショットをすべてクリアしますか？')) {
                 localStorage.removeItem('traffic_snapshots');
-                location.reload();
+                loadSnapshots();
             }
         }
     </script>
 </body>
 </html>
-

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>スナップショット一覧 & PDF出力</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f8f9fa; padding: 20px; }
+        .no-print { background: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        .btn-pdf { background-color: #007bff; color: white; }
+        .btn-clear { background-color: #dc3545; color: white; }
+        
+        /* グラフ一覧のレイアウト */
+        .snapshot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .snapshot-card { background: white; border: 1px solid #ccc; padding: 15px; border-radius: 6px; page-break-inside: avoid; }
+        .snapshot-card h3 { margin-top: 0; font-size: 1.1em; color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+        .snapshot-card img { width: 100%; height: auto; }
+        
+        /* 💡 PDF・印刷用の最適化設定 */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; padding: 0; }
+            .snapshot-grid { display: block; } /* 印刷時は縦並び、または綺麗に収まるように変更可能 */
+            .snapshot-card { margin-bottom: 30px; border: none; padding: 0; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 印刷時に非表示にする操作ナビゲーションパネル -->
+    <div class="no-print">
+        <h2>📸 スナップショット管理パネル</h2>
+        <p>メインページで一時保存したトラフィックグラフの一覧です。PDF化したい場合は「PDF・印刷を出力」を押してください。</p>
+        <button class="btn btn-pdf" onclick="window.print()">📄 PDF・印刷を出力する</button>
+        <button class="btn btn-clear" onclick="clearSnapshots()">🗑️ リストを全削除</button>
+        <a href="/" style="color: #007bff; text-decoration: none; margin-left: 15px;">← メインモニターへ戻る</a>
+    </div>
+
+    <!-- グラフ表示領域 -->
+    <div id="snapshot-container" class="snapshot-grid">
+        <!-- JavaScriptで動的にカードが挿入されます -->
+    </div>
+
+    <script>
+        // ページ読み込み時にLocalStorageからデータをロードして描画
+        document.addEventListener("DOMContentLoaded", function() {
+            const container = document.getElementById('snapshot-container');
+            const snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
+            
+            if (snapshots.length === 0) {
+                container.innerHTML = '<p class="no-print" style="color:red; font-weight:bold;">一時保存されたスナップショットはありません。</p>';
+                return;
+            }
+            
+            snapshots.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.className = 'snapshot-card';
+                card.innerHTML = `
+                    <h3>📊 ポート: ${item.interface} <span style="font-size:0.8em; font-weight:normal; color:#666;">${item.desc ? ' - ' + item.desc : ''}</span></h3>
+                    <img src="${item.imgSrc}" alt="グラフ">
+                    <div style="font-size: 0.8em; color: #999; margin-top: 5px; text-align: right;" class="no-print">保存日時: ${item.timestamp}</div>
+                `;
+                container.appendChild(card);
+            });
+        });
+
+        // データを全削除
+        function clearSnapshots() {
+            if (confirm('一時保存されているスナップショットをすべてクリアしますか？')) {
+                localStorage.removeItem('traffic_snapshots');
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
+
