@@ -1737,7 +1737,7 @@ async def timeseries_board3(
             selected_pairs.append({"switch": sw_part, "filename": fn_part, "raw": rt})
             
     # 最大5ポートまでに制限
-    selected_pairs = selected_pairs[:5]
+    #selected_pairs = selected_pairs[:5]    #MAX
 
     # デフォルトの初期選択状態（何も選ばれていない場合）
     #if not selected_pairs and all_switches:

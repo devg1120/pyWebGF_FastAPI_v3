@@ -50,7 +50,10 @@
                                     display: flex;
                                     justify-content: space-between">
                             <span>📌 現在の選択ポート一覧</span>
+			    <!-- MAX
                             <span id="badge_count" style="color: #2b6cb0;">{{ selected_pairs|length }} / 5 件選択中</span>
+			    -->
+                            <span id="badge_count" style="color: #2b6cb0;">{{ selected_pairs|length }} 件選択中</span>
                         </div>
                         <div id="badge-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
                             {% if selected_pairs %}
@@ -90,6 +93,26 @@
                             {% endif %}
                         </div>
                     </div>
+<div style="margin: 20px 0; padding: 15px; background: #fdfdfd; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <h4 style="margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 5px;">💾 選択ポートリストの保存・呼び出し</h4>
+    
+    <!-- ① 保存用フォーム -->
+    <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+        <input type="text" id="list_name_input" placeholder="このポートリストに名前を付ける（例: コアSWセット）" style="flex: 1; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px;">
+        <button type="button" id="save_list_btn" style="background: #28a745; color: white; border: none; padding: 6px 15px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            現在のリストを保存
+        </button>
+    </div>
+
+    <!-- ② 読み込み用エリア -->
+    <div>
+        <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px; font-weight: bold;">📋 保存済みのリスト一覧:</label>
+        <div id="saved_lists_container" style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <!-- ここにJavaScriptで保存されたリストがボタンとして動的に展開されます -->
+            <span style="color: #999; font-size: 0.9em;">保存されたリストはありません。</span>
+        </div>
+    </div>
+</div>
 <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ddd;">
     <h4 style="margin-top: 0;">🔌 ポートを追加選択（2階層セレクタ）</h4>
     
@@ -250,12 +273,14 @@
                         </div>
 			-->
                         <!-- 💡 【横並びFlex】 ポート別（横軸・列） -->
-                        <div class="columns-flex">
+                        <div class="sync-scroll-row columns-flex">
                             {# 💡 【内側ループ】 選択されたポート群（列の展開） #}
 			    <!--
                             <span class="date" >{{ day.formatted }} ({{ day.weekdays_jp }})</span>
 			    -->
-                            <span class="date" >{{ day.formatted }} (<span style="
+		          <div style="position: sticky; left: 0; z-index: 10; background: #f8f9fa; border-right: 2px solid #007bff; padding: 15px; display: flex; flex-direction: column; justify-content: center; min-width: 96px; box-shadow: 4px 0 8px rgba(0,0,0,0.05); font-weight: bold; color: #333;">
+
+                            <span style="font-size: 0.8em;" >{{ day.formatted }} (<span style="
 					    color:
 					    {%  if day.weekdays_index == 6 %}
 					       red
@@ -266,6 +291,7 @@
                                             {% endif %}
 					    ;" >{{day.weekdays_jp}}</span>)
 			    </span>
+                            </div>
                             {% for target in selected_pairs %}
                                 <div class="matrix-column-card" style="max-width: {{ max_width_style }};">
                                     <!-- 列の見出し（どのスイッチのどのポートか） -->
@@ -346,15 +372,16 @@
             const selectedOptions = Array.from(tsBoardSelect.selectedOptions);
             
             // 1. 最大5個制限のチェック
+/* MAX
             if (selectedOptions.length > 5) {
                 alert('同時にマトリクス比較できるポートは最大5つまでです。');
                 selectedOptions[selectedOptions.length - 1].selected = false;
                 return;
             }
-
+*/
             // 2. 件数表示の更新
             if (badgeCount) {
-                badgeCount.textContent = `${selectedOptions.length} / 5 件選択中`;
+                badgeCount.textContent = `${selectedOptions.length} 件選択中`;
             }
 
             // 3. バッジの動的生成
@@ -586,11 +613,12 @@ function addSelectedPortPair() {
     }
     
     // 上限5件チェック
+/* MAX
     if (currentPairs.length >= 5) {
         alert("同時選択は最大5ポートまでです。先に既存のバッジを削除してください。");
         return;
     }
-
+*/
     // パラメータに新しいペアを蓄積して画面をリロード
     params.append('target_pairs', newRawValue);
     window.location.href = currentUrl.pathname + '?' + params.toString();
@@ -656,9 +684,149 @@ function handleDragEnd(e) {
 }
 
 </script>
-}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // Jinja2から現在選択されているポートの「raw文字列（例: SW1::port1.csv）」をJavaScript配列として確実に受け取る
+    const currentPairs = [
+        {% for p in selected_pairs %}
+        "{{ p.raw }}",
+        {% endfor %}
+    ];
 
+    const saveBtn = document.getElementById("save_list_btn");
+    const nameInput = document.getElementById("list_name_input");
+    const container = document.getElementById("saved_lists_container");
 
+    const STORAGE_KEY = "fastapi_ts_board_port_lists";
+
+    // ─── 1. LocalStorageからデータを取得 ───
+    function getSavedLists() {
+        const data = localStorage.getItem(STORAGE_KEY);
+        return data ? JSON.parse(data) : {};
+    }
+
+    // ─── 2. リスト一覧を画面に描画 ───
+    function renderSavedLists() {
+        const lists = getSavedLists();
+        container.innerHTML = "";
+
+        const keys = Object.keys(lists);
+        if (keys.length === 0) {
+            container.innerHTML = '<span style="color: #999; font-size: 0.9em;">保存されたリストはありません。</span>';
+            return;
+        }
+
+        keys.forEach(name => {
+            const wrapper = document.createElement("div");
+            wrapper.style.cssText = "display: inline-flex; align-items: center; background: #eef7ff; border: 1px solid #b8daff; border-radius: 4px; overflow: hidden; font-size: 0.9em;";
+
+            // 読み込みボタン本体
+            const loadBtn = document.createElement("button");
+            loadBtn.type = "button";
+            loadBtn.innerText = `📊 ${name} (${lists[name].length}件)`;
+            loadBtn.style.cssText = "background: none; border: none; padding: 5px 10px; cursor: pointer; color: #004085; font-weight: 500;";
+            loadBtn.onclick = function() {
+                // 保存されているポート構成を現在のURLパラメータにマッピングして遷移
+                const url = new URL(window.location.href);
+                // 既存の target_pairs を一度すべて削除
+                url.searchParams.delete("target_pairs");
+                // 新しいリストのポート群をクエリパラメータに追加
+                lists[name].forEach(pairRaw => {
+                    url.searchParams.append("target_pairs", pairRaw);
+                });
+                // 画面をリロード（選択が適用される）
+                window.location.href = url.toString();
+            };
+
+            // 削除ボタン (×)
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.innerText = "×";
+            deleteBtn.style.cssText = "background: #f8d7da; border: none; border-left: 1px solid #f5c6cb; padding: 5px 8px; cursor: pointer; color: #721c24; font-weight: bold;";
+            deleteBtn.onclick = function(e) {
+                e.stopPropagation();
+                if (confirm(`「${name}」を削除してもよろしいですか？`)) {
+                    const currentLists = getSavedLists();
+                    delete currentLists[name];
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentLists));
+                    renderSavedLists();
+                }
+            };
+
+            wrapper.appendChild(loadBtn);
+            wrapper.appendChild(deleteBtn);
+            container.appendChild(wrapper);
+        });
+    }
+
+    // ─── 3. 現在の構成を保存する処理 ───
+    saveBtn.onclick = function() {
+        const name = nameInput.value.trim();
+        if (!name) {
+            alert("リスト名を入力してください。");
+            return;
+        }
+
+        if (currentPairs.length === 0) {
+            alert("現在ポートが何も選択されていません。下のリストから追加してください。");
+            return;
+        }
+
+        const lists = getSavedLists();
+        
+        // 同名リストの上書き確認
+        if (lists[name]) {
+            if (!confirm(`すでに「${name}」というリストが存在します。上書きしますか？`)) {
+                return;
+            }
+        }
+
+        // 保存実行
+        lists[name] = currentPairs;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(lists));
+        
+        // 入力欄をクリアして再描画
+        nameInput.value = "";
+        renderSavedLists();
+        alert(`「${name}」を保存しました！`);
+    };
+
+    // 初回読み込み時の描画実行
+    renderSavedLists();
+});
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // すべてのスクロール対象行を取得
+    const rows = document.querySelectorAll(".sync-scroll-row");
+    let activeRow = null;
+
+    rows.forEach(row => {
+        // マウスが要素の上に乗った、またはタッチされた時に「操作対象」としてロックする
+        row.addEventListener("mouseenter", function() {
+            activeRow = this;
+        });
+        row.addEventListener("touchstart", function() {
+            activeRow = this;
+        });
+
+        // スクロールイベントの検知
+        row.addEventListener("scroll", function() {
+            // 自分が操作対象（アクティブ）ではない場合は、他の行からの同期処理中なので無視する
+            if (activeRow !== this) return;
+
+            const scrollLeft = this.scrollLeft;
+
+            // 自分以外のすべての行のスクロール位置を同期
+            rows.forEach(otherRow => {
+                if (otherRow !== this) {
+                    otherRow.scrollLeft = scrollLeft;
+                }
+            });
+        });
+    });
+});
 </script>
 
 
