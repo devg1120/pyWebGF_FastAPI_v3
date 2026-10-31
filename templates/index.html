@@ -466,7 +466,7 @@
 <!-- HTML内のループの中にあるポップアップ定義部分 -->
 <div id="popup-{{ loop.index }}" class="draggable-popup">
     <div class="popup-header" id="popup-header-{{ loop.index }}">
-        <span class="popup-title">{{ ns.interface }} - 拡大</span>
+	    <span class="popup-title"><span style="background-color:lightgray;"> {{ selected_switch}} </span> &nbsp; <span style="color: green;">{{ ns.interface }}</span> &nbsp; {{ ns.desc }}</span>
         <button class="close-btn" onclick="closePopup('{{ loop.index }}')">✕ 閉じる</button>
     </div>
     <!-- 💡 BODYの中身を以下のように <img> に変更、または追加してください -->
