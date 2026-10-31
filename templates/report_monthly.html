@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月間トラフィック分析レポート 1- {{ switch }}</title>
+    <link href="https://jsdelivr.net" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; font-size: 0.9rem; }
+        .report-wrapper { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .table th { background-color: #343a40; color: white; white-space: nowrap; vertical-align: middle; }
+        .table-striped tbody tr:nth-of-type(odd) { background-color: rgba(0, 0, 0, 0.02); }
+        .metric-val { font-family: 'Courier New', Courier, monospace; text-align: right; }
+        @media print {
+            .no-print { display: none; }
+            body { background: white; }
+            .report-wrapper { box-shadow: none; padding: 0 !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid my-4">
+        <!-- 操作系ナビ（非表示印刷用） -->
+        <div class="d-flex justify-content-between align-items-center mb-3 no-print mx-3">
+            <a href="javascript:history.back()" class="btn btn-sm btn-secondary">⬅ 戻る</a>
+            <button onclick="window.print()" class="btn btn-sm btn-primary">🖨️ レポートを印刷 / PDF出力</button>
+        </div>
+
+        <div class="p-4 report-wrapper mx-2">
+            <!-- 宛先ヘッダー -->
+            <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+                <div>
+                    <h2 class="fw-bold text-dark mb-1">📅 月間トラフィック分析レポート</h2>
+                    <p class="text-muted mb-0">対象機器: <span class="badge bg-dark fs-6">{{ switch }}</span></p>
+                </div>
+                <div class="text-end text-muted">
+                    <div>対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong></div>
+                    <div>集計時間帯: {{ start_hour }}:00 ～ {{ end_hour }}:55</div>
+                </div>
+            </div>
+
+            <!-- 全ポート統計マトリクス表 -->
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="text-center">ポート名</th>
+                            <th rowspan="2" class="text-center">説明 (用途)</th>
+                            <th colspan="2" class="text-center bg-danger">最大（ピーク）速度 (Mbps)</th>
+                            <th colspan="2" class="text-center bg-success">平均通信速度 (Mbps)</th>
+                            <th colspan="2" class="text-center bg-info text-dark">総転送量 (GB)</th>
+                            <th rowspan="2" class="text-center no-print">詳細</th>
+                        </tr>
+                        <tr>
+                            <th class="text-center bg-opacity-10 bg-danger text-danger">In</th>
+                            <th class="text-center bg-opacity-10 bg-danger text-danger">Out</th>
+                            <th class="text-center bg-opacity-10 bg-success text-success">In</th>
+                            <th class="text-center bg-opacity-10 bg-success text-success">Out</th>
+                            <th class="text-center bg-opacity-10 bg-info text-dark">Inbound</th>
+                            <th class="text-center bg-opacity-10 bg-info text-dark">Outbound</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for port in report_data %}
+                        <tr>
+                            <td class="fw-bold text-primary">{{ port.port_name }}</td>
+                            <td class="text-muted small">{{ port.desc or '---' }}</td>
+                            <!-- ピーク -->
+                            <td class="metric-val text-danger fw-bold">{{ "{:,.1f}".format(port.max_in) }}</td>
+                            <td class="metric-val text-danger fw-bold">{{ "{:,.1f}".format(port.max_out) }}</td>
+                            <!-- 平均 -->
+                            <td class="metric-val text-success">{{ "{:,.2f}".format(port.avg_in) }}</td>
+                            <td class="metric-val text-success">{{ "{:,.2f}".format(port.avg_out) }}</td>
+                            <!-- 総転送量 -->
+                            <td class="metric-val text-secondary">{{ "{:,.2f}".format(port.total_in_gb) }}</td>
+                            <td class="metric-val text-secondary">{{ "{:,.2f}".format(port.total_out_gb) }}</td>
+                            <!-- 単日・詳細への動的リンク -->
+                            <td class="text-center no-print">
+                                <a href="/plot?base_id={{ base_id }}&mode=range&start_dd={{ yyyymm[:4] }}-{{ yyyymm[4:] }}-01&end_dd={{ yyyymm[:4] }}-{{ yyyymm[4:] }}-31&switch={{ switch }}&filename={{ port.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols=1" 
+                                   class="btn btn-xs btn-outline-dark px-2 py-0" style="font-size:0.75rem;" target="_blank">
+                                    📈 期間グラフ
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- システム総評・フッター -->
+            <div class="mt-4 pt-3 border-top d-flex justify-content-between text-muted small">
+                <span>※ 欠損値（330秒以上のデータギャップ）は集計の計算対象から除外されています。</span>
+                <span>SNMP トラフィックモニター バッチシステム</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

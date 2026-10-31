@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>トラフィック分析レポート - {{ switch }}</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://jsdelivr.net" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .report-card { background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        @media print {
+            .no-print { display: none; }
+            body { background: white; }
+            .report-card { box-shadow: none; border: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container my-5">
+        <!-- 上部ナビゲーション / 操作エリア -->
+        <div class="d-flex justify-content-between align-items-center mb-4 no-print">
+            <a href="javascript:history.back()" class="btn btn-secondary">⬅ 戻る</a>
+            <button onclick="window.print()" class="btn btn-primary">🖨️ レポートを印刷 / PDF保存</button>
+        </div>
+
+        <!-- レポート本体 -->
+        <div class="card p-5 report-card">
+            <!-- ヘッダーエリア -->
+            <div class="border-bottom pb-3 mb-4 text-center">
+                <h1 class="fw-bold text-dark">📊 トラフィック分析レポート</h1>
+                <p class="text-muted mb-0">生成日時: 2026年10月31日 | 対象リソース: {{ switch }} ({{ filename | replace('.csv','') }})</p>
+            </div>
+
+            <!-- 概要 / 条件情報 -->
+            <div class="row g-3 mb-4 bg-light p-3 rounded">
+                <div class="col-6 col-md-3"><strong>環境 (ソース):</strong> <span class="text-primary">{{ base_id }}</span></div>
+                <div class="col-6 col-md-3"><strong>対象日付:</strong> {{ yyyymm[:4] }}年{{ yyyymm[4:] }}月{{ dd }}日</div>
+                <div class="col-6 col-md-3"><strong>集計時間帯:</strong> {{ start_hour }}時 ～ {{ end_hour }}時</div>
+                <div class="col-6 col-md-3"><strong>インターフェース:</strong> {{ filename }}</div>
+            </div>
+
+            <!-- 主要メトリクス（サマリーカード） -->
+            <h4 class="mb-3 text-secondary border-start border-4 border-primary ps-2">📈 トラフィック統計サマリー</h4>
+            <div class="row g-3 mb-5">
+                <!-- ピーク速度 -->
+                <div class="col-md-4">
+                    <div class="card border-danger h-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-danger">🔥 最大（ピーク）速度</h6>
+                            <p class="card-text mb-1"><strong>In:</strong> {{ "{:,.2f}".format(metrics.max_in_mbps) }} Mbps</p>
+                            <p class="card-text"><strong>Out:</strong> {{ "{:,.2f}".format(metrics.max_out_mbps) }} Mbps</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- 平均速度 -->
+                <div class="col-md-4">
+                    <div class="card border-success h-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-success">💤 平均通信速度</h6>
+                            <p class="card-text mb-1"><strong>In:</strong> {{ "{:,.2f}".format(metrics.avg_in_mbps) }} Mbps</p>
+                            <p class="card-text"><strong>Out:</strong> {{ "{:,.2f}".format(metrics.avg_out_mbps) }} Mbps</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- 総転送量 -->
+                <div class="col-md-4">
+                    <div class="card border-info h-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-info">📦 期間内 総転送量</h6>
+                            <p class="card-text mb-1"><strong>Inbound:</strong> {{ "{:,.3f}".format(metrics.total_in_gb) }} GB</p>
+                            <p class="card-text"><strong>Outbound:</strong> {{ "{:,.3f}".format(metrics.total_out_gb) }} GB</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- トラフィック推移グラフ -->
+            <h4 class="mb-3 text-secondary border-start border-4 border-primary ps-2">📊 トラフィック推移（可視化）</h4>
+            <div class="text-center mb-5 bg-white p-2 border rounded">
+                <!-- 既存の /plot をインライン画像として埋め込み -->
+                <img src="{{ plot_url }}" alt="Traffic Plot" class="img-fluid w-100">
+            </div>
+
+            <!-- 自動生成コメント / 分析のまとめ -->
+            <h4 class="mb-3 text-secondary border-start border-4 border-primary ps-2">🧠 システム分析コメント</h4>
+            <div class="alert alert-secondary mb-0">
+                {% if comments %}
+                    <ul class="mb-0 ps-3">
+                        {% for comment in comments %}
+                            <li class="mb-2">{{ comment }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="mb-0">特筆すべき異常なトラフィック傾向やバーストは検出されませんでした。</p>
+                {% endif %}
+            </div>
+            
+            <!-- レポートフッター -->
+            <div class="text-center mt-5 pt-3 border-top text-muted small">
+                © SNMP トラフィックモニター - 自動生成分析レポート
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

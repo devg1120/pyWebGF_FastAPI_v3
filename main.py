@@ -11,6 +11,7 @@ import json
 import traceback
 from typing import Optional
 from socket import gethostname
+import asyncio
 
 import pandas as pd
 import matplotlib
@@ -2204,6 +2205,421 @@ async def snapshots_page(request: Request):
         context={}
     )
 
+@app.get("/report", response_class=HTMLResponse)
+async def traffic_report(
+    request: Request,
+    base_id: Optional[str] = None,
+    yyyymm: str = "",
+    dd: str = "",
+    switch: str = "",
+    filename: str = "",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    """指定された条件・時間帯のトラフィックを分析してレポートを表示する"""
+    if not base_id:
+        base_id = get_default_base_id()
+    actual_base = get_base_dir_path(base_id)
+    
+    # 1. 対象のスイッチディレクトリまでのパスを確定
+    target_dir = os.path.join(actual_base, yyyymm, dd, switch)
+    if not os.path.exists(target_dir):
+        return HTMLResponse(
+            content=f"<h1>エラー: 対象のディレクトリが見つかりません。</h1><p>{yyyymm}/{dd} - {switch}</p>",
+            status_code=404
+        )
+
+    # 2. ディレクトリ内のCSVファイルを検索・ソート（main.pyの既存ロジックと同期）
+    csv_files = sorted(glob.glob(os.path.join(target_dir, "*.*.csv")) or glob.glob(os.path.join(target_dir, "*.csv")))
+    csv_filenames = natsorted([os.path.basename(f) for f in csv_files])
+
+    if not csv_filenames:
+        return HTMLResponse(
+            content=f"<h1>エラー: 指定されたディレクトリ内にCSVファイルが存在しません。</h1><p>{target_dir}</p>",
+            status_code=404
+        )
+
+    # 3. 【最重要】ファイル名の自動解決ガード
+    # filenameが空、または取得したリスト内に存在しない場合は先頭のCSVファイルを強制適用して例外を防ぐ
+    if not filename or filename not in csv_filenames:
+        filename = csv_filenames[0]
+
+    # 最終的な物理ファイルパスの確定
+    file_path = os.path.join(target_dir, filename)
+
+    # 4. info.json の読み込み（インターフェース説明等の補完用）
+    info_dic = {}
+    info_json_path = os.path.join(target_dir, "info.json")
+    if os.path.exists(info_json_path):
+        with open(info_json_path, "r", encoding="utf-8") as f:
+            try:
+                info_dic = json.load(f)
+            except:
+                pass
+
+    # ─── ここから下のデータ処理・集計ロジックは前のコードと共通です ───
+    df = await run_in_threadpool(pd.read_csv, file_path, engine="c")
+    if len(df.columns) >= 6:
+        df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+    elif len(df.columns) >= 3:
+        df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
+
+    df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
+    df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
+
+    base_date = pd.to_datetime(f"{yyyymm[:4]}-{yyyymm[4:]}-{dd}").normalize()
+    start_time = base_date + pd.Timedelta(hours=start_hour)
+    end_time = base_date + pd.Timedelta(hours=end_hour, minutes=55)
+    df_filtered = df[(df["日時"] >= start_time) & (df["日時"] <= end_time)].copy()
+
+    if df_filtered.empty:
+        return HTMLResponse(
+            content=f"<h1>エラー: 指定された時間帯（{start_hour}時〜{end_hour}時）にデータが存在しません。</h1>",
+            status_code=400
+        )
+
+    time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
+    is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
+
+    df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
+    df_filtered.loc[is_missing, "差分A"] = None
+    df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
+
+    if "項目B" in df_filtered.columns:
+        df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
+        df_filtered.loc[is_missing, "差分B"] = None
+        df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
+    else:
+        df_filtered["bps_B"] = 0
+
+    max_in_bps = df_filtered["bps_A"].max() or 0
+    max_out_bps = df_filtered["bps_B"].max() or 0
+    avg_in_bps = df_filtered["bps_A"].mean() or 0
+    avg_out_bps = df_filtered["bps_B"].mean() or 0
+    total_in_bytes = df_filtered["差分A"].sum() or 0
+    total_out_bytes = df_filtered["差分B"].sum() or 0
+
+    metrics = {
+        "max_in_mbps": max_in_bps / 1_000_000,
+        "max_out_mbps": max_out_bps / 1_000_000,
+        "avg_in_mbps": avg_in_bps / 1_000_000,
+        "avg_out_mbps": avg_out_bps / 1_000_000,
+        "total_in_gb": total_in_bytes / (1024 * 1024 * 1024),
+        "total_out_gb": total_out_bytes / (1024 * 1024 * 1024),
+    }
+
+    comments = []
+    if metrics["max_in_mbps"] > 800 or metrics["max_out_mbps"] > 800:
+        comments.append("⚠️ 一時的に帯域の上限（1Gbps）に近いスパイク（バースト）トラフィックを検知しました。")
+    else:
+        comments.append("✅ 瞬間的な帯域逼迫は見られず、安定したトラフィック傾向です。")
+        
+    if metrics["avg_in_mbps"] > 400 or metrics["avg_out_mbps"] > 400:
+        comments.append("📊 定常的な利用率が高めです。今後の増強を検討することをお勧めします。")
+
+    # インターフェースの日本語説明（info.jsonから取得）
+    interface_key = filename.replace(".csv", "")
+    desc = info_dic.get(interface_key, {}).get("desc", "") if isinstance(info_dic.get(interface_key), dict) else info_dic.get(interface_key, "")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="report.html",
+        context={
+            "base_id": base_id,
+            "yyyymm": yyyymm,
+            "dd": dd,
+            "switch": switch,
+            "filename": filename,
+            "desc": desc,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+            "metrics": metrics,
+            "comments": comments,
+            "plot_url": f"/plot?base_id={base_id}&yyyymm={yyyymm}&dd={dd}&switch={switch}&filename={filename}&start_hour={start_hour}&end_hour={end_hour}&cols=1"
+        },
+    )
+
+@app.get("/report_monthly", response_class=HTMLResponse)
+async def traffic_report_monthly(
+    request: Request,
+    base_id: Optional[str] = None,
+    yyyymm: str = "",
+    switch: str = "",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    """指定された月（1ヶ月間）の指定スイッチ配下の全ポートの統計レポートを表示する"""
+    if not base_id:
+        base_id = get_default_base_id()
+    actual_base = get_base_dir_path(base_id)
+
+    # 1. 指定された月(YYYYMM)配下の日(DD)ディレクトリを走査
+    month_dir = os.path.join(actual_base, yyyymm)
+    if not os.path.exists(month_dir):
+        return HTMLResponse(
+            content=f"<h1>エラー: 指定された月のデータが見つかりません。</h1><p>パス: {month_dir}</p>",
+            status_code=404
+        )
+
+    dd_dirs = sorted([d for d in glob.glob(os.path.join(month_dir, "*")) if os.path.isdir(d)])
+
+    # 2. スイッチ配下の全ポート（CSVファイル名）を一堂に集める
+    port_files_map = {} # { "Gi0_1.csv": [パス1, パス2, ...] }
+    info_dic = {}
+
+    for d_dir in dd_dirs:
+        sw_dir = os.path.join(d_dir, switch)
+        if os.path.exists(sw_dir):
+            csv_files = glob.glob(os.path.join(sw_dir, "*.csv"))
+            for f in csv_files:
+                fname = os.path.basename(f)
+                if fname not in port_files_map:
+                    port_files_map[fname] = []
+                port_files_map[fname].append(f)
+
+            # info.jsonからインターフェース情報を補完
+            info_json_path = os.path.join(sw_dir, "info.json")
+            if os.path.exists(info_json_path):
+                try:
+                    with open(info_json_path, "r", encoding="utf-8") as inf:
+                        info_dic.update(json.load(inf))
+                except:
+                    pass
+
+    if not port_files_map:
+        return HTMLResponse(
+            content=f"<h1>エラー: 対象スイッチのデータファイルが見つかりません。</h1><p>スイッチ: {switch}</p>",
+            status_code=404
+        )
+
+    # 3. 各ポートごとに1ヶ月分のデータをPandasで高速マージ・集計処理
+    report_data = []
+
+    # ─── 修正前: async def process_port(fname, paths):
+    # ─── 修正後: 通常の同期関数(def)に変更します
+    def process_port(fname, paths):
+        df_list = []
+        for p in paths:
+            try:
+                # 内部では同期処理としてそのまま read_csv を呼ぶ
+                _df = pd.read_csv(p, engine="c")
+                if not _df.empty:
+                    df_list.append(_df)
+            except:
+                continue
+
+        if not df_list:
+            return None
+
+        df = pd.concat(df_list, ignore_index=True)
+
+        if len(df.columns) >= 6:
+            df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+        elif len(df.columns) >= 3:
+            df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
+
+        df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
+        df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
+
+        df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
+        if df_filtered.empty:
+            return None
+
+        time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
+        is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
+
+        df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
+        df_filtered.loc[is_missing, "差分A"] = None
+        df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
+
+        if "項目B" in df_filtered.columns:
+            df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
+            df_filtered.loc[is_missing, "差分B"] = None
+            df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
+        else:
+            df_filtered["bps_B"] = 0
+
+        return {
+            "port_name": fname.replace(".csv", ""),
+            "filename": fname,
+            "max_in": (df_filtered["bps_A"].max() or 0) / 1_000_000,
+            "max_out": (df_filtered["bps_B"].max() or 0) / 1_000_000,
+            "avg_in": (df_filtered["bps_A"].mean() or 0) / 1_000_000,
+            "avg_out": (df_filtered["bps_B"].mean() or 0) / 1_000_000,
+            "total_in_gb": (df_filtered["差分A"].sum() or 0) / (1024 * 1024 * 1024),
+            "total_out_gb": (df_filtered["差分B"].sum() or 0) / (1024 * 1024 * 1024),
+            "desc": info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), "")
+        }
+
+
+
+    # 各ポートの並列計算タスクをプール内で実行
+    tasks = [run_in_threadpool(process_port, fname, paths) for fname, paths in port_files_map.items()]
+    results = await asyncio.gather(*tasks)
+    report_data = natsorted([r for r in results if r is not None], key=lambda x: x["port_name"])
+
+    return templates.TemplateResponse(
+        request=request,
+        name="report_monthly.html",
+        context={
+            "base_id": base_id,
+            "yyyymm": yyyymm,
+            "switch": switch,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+            "report_data": report_data,
+        },
+    )
+
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.get("/report_monthly2", response_class=HTMLResponse)
+async def traffic_report_monthly_page(
+    request: Request,
+    base_id: Optional[str] = None,
+    yyyymm: str = "",
+    switch: str = "",
+    start_hour: int = 8,
+    end_hour: int = 18,
+):
+    """まずは進捗表示用のスケルトン画面（待機画面）を即座に返す"""
+    return templates.TemplateResponse(
+        request=request,
+        name="report_monthly2.html",
+        context={
+            "base_id": base_id or "default",
+            "yyyymm": yyyymm,
+            "switch": switch,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+        },
+    )
+
+@app.websocket("/ws/report_monthly")
+async def ws_traffic_report_monthly(websocket: WebSocket):
+    """WebSocketを通じてリアルタイムに進捗を送りながらPandas計算を行う"""
+    await websocket.accept()
+    
+    try:
+        # 1. 接続直後にブラウザから送られてくるパラメータを受け取る
+        params = await websocket.receive_json()
+        base_id = params.get("base_id")
+        yyyymm = params.get("yyyymm")
+        switch = params.get("switch")
+        start_hour = int(params.get("start_hour", 8))
+        end_hour = int(params.get("end_hour", 18))
+        
+        actual_base = get_base_dir_path(base_id)
+        month_dir = os.path.join(actual_base, yyyymm)
+        
+        if not os.path.exists(month_dir):
+            await websocket.send_json({"status": "error", "message": f"指定月のデータが見つかりません。({yyyymm})"})
+            return
+
+        dd_dirs = sorted([d for d in glob.glob(os.path.join(month_dir, "*")) if os.path.isdir(d)])
+        
+        port_files_map = {}
+        info_dic = {}
+        for d_dir in dd_dirs:
+            sw_dir = os.path.join(d_dir, switch)
+            if os.path.exists(sw_dir):
+                for f in glob.glob(os.path.join(sw_dir, "*.csv")):
+                    fname = os.path.basename(f)
+                    if fname not in port_files_map: port_files_map[fname] = []
+                    port_files_map[fname].append(f)
+                info_json_path = os.path.join(sw_dir, "info.json")
+                if os.path.exists(info_json_path):
+                    try:
+                        with open(info_json_path, "r", encoding="utf-8") as inf:
+                            info_dic.update(json.load(inf))
+                    except: pass
+
+        if not port_files_map:
+            await websocket.send_json({"status": "error", "message": f"スイッチデータが見つかりません。({switch})"})
+            return
+
+        # 同期用処理関数
+        def process_port(fname, paths):
+            df_list = []
+            for p in paths:
+                try:
+                    _df = pd.read_csv(p, engine="c")
+                    if not _df.empty: df_list.append(_df)
+                except: continue
+            if not df_list: return None
+            
+            df = pd.concat(df_list, ignore_index=True)
+            if len(df.columns) >= 6:
+                df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+            elif len(df.columns) >= 3:
+                df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
+                
+            df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
+            df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
+            df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
+            if df_filtered.empty: return None
+            
+            time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
+            is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
+            df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
+            df_filtered.loc[is_missing, "差分A"] = None
+            df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
+            
+            if "項目B" in df_filtered.columns:
+                df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
+                df_filtered.loc[is_missing, "差分B"] = None
+                df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
+            else:
+                df_filtered["bps_B"] = 0
+                
+            return {
+                "port_name": fname.replace(".csv", ""),
+                "filename": fname,
+                "max_in": (df_filtered["bps_A"].max() or 0) / 1_000_000,
+                "max_out": (df_filtered["bps_B"].max() or 0) / 1_000_000,
+                "avg_in": (df_filtered["bps_A"].mean() or 0) / 1_000_000,
+                "avg_out": (df_filtered["bps_B"].mean() or 0) / 1_000_000,
+                "total_in_gb": (df_filtered["差分A"].sum() or 0) / (1024 * 1024 * 1024),
+                "total_out_gb": (df_filtered["差分B"].sum() or 0) / (1024 * 1024 * 1024),
+                "desc": info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), "")
+            }
+
+        # 4. 【リアルタイムコア】ループを回しながら、1件ずつ進捗率をフロントに送信
+        sorted_ports = natsorted(list(port_files_map.keys()))
+        total_ports = len(sorted_ports)
+        report_data = []
+
+        await websocket.send_json({"status": "progress", "progress": 0, "log": f"分析カタログの初期化完了。総ポート数: {total_ports}"})
+
+        for idx, fname in enumerate(sorted_ports, start=1):
+            paths = port_files_map[fname]
+            # 1ポートの計算を同期プールで実行
+            res = await run_in_threadpool(process_port, fname, paths)
+            if res:
+                report_data.append(res)
+            
+            # 進捗パーセンテージの計算
+            percent = int((idx / total_ports) * 100)
+            await websocket.send_json({
+                "status": "progress",
+                "progress": percent,
+                "log": f"[{idx}/{total_ports}] ポート {fname.replace('.csv','')} の集計が完了しました。"
+            })
+            # ネットワーク過密防止のわずかなウェイト
+            await asyncio.sleep(0.01)
+
+        # 5. すべて完了したら最終データを一括送信
+        await websocket.send_json({
+            "status": "complete",
+            "progress": 100,
+            "data": report_data
+        })
+
+    except WebSocketDisconnect:
+        print("Client disconnected.")
+    except Exception as e:
+        await websocket.send_json({"status": "error", "message": str(e)})
 
 if __name__ == "__main__":
     import uvicorn

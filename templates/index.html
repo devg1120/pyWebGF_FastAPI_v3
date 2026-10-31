@@ -207,6 +207,20 @@
                     </button>
                 </div>
                 <div class="nav-links" style="margin-bottom: 15px;">
+<a href="/report?base_id={{ selected_base_id }}&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&switch={{ selected_switch }}&filename={{ filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}" 
+   class="btn btn-sm btn-outline-info" target="_blank">
+   📋 分析レポートを見る
+</a>
+<a href="/report_monthly?base_id={{ selected_base_id }}&yyyymm={{ selected_yyyymm }}&switch={{ selected_switch }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}" 
+   class="btn btn-warning fw-bold text-dark ms-2" target="_blank">
+   📊 このスイッチの月間レポート(全ポート)を出力
+</a>
+
+<a href="/report_monthly2?base_id={{ selected_base_id }}&yyyymm={{ selected_yyyymm }}&switch={{ selected_switch }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}"
+   class="btn btn-warning fw-bold text-dark ms-2" target="_blank">
+   📅 このスイッチの月間レポート(全ポート)を出力
+</a>
+
                     <a href="/timeseries_board?base_id={{ selected_base_id }}" class="btn">📊 タイムシリーズ</a>
                     <a href="/timeseries_board2?base_id={{ selected_base_id }}" class="btn">📊 タイムシリーズ2</a>
                     <a href="/timeseries_board3?base_id={{ selected_base_id }}" class="btn">📊 タイムシリーズ3</a>
