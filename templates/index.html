@@ -9,6 +9,9 @@
         h5, h4 { margin-top: 0; margin-bottom: 10px; }
         
         /* 💡 【重要】position: fixed に変更し、上左右の余白をヘッダー内で担保することで完全に固定 */
+
+	{% set header_height = "480px" %}
+
         .sticky-header { position: fixed; top: 0; left: 0; right: 0; background-color: #ffffff; z-index: 1000; padding: 20px 20px 10px 20px; border-bottom: 2px solid #eee; box-sizing: border-box; }
         
         .mode-tab { margin-bottom: 15px; padding: 10px; background-color: #f7f7f7; border: 1px solid #ddd; }
@@ -25,13 +28,13 @@
         .container { display: flex; gap: 20px; align-items: flex-start; flex-grow: 1; margin-top: 460px; padding: 0 20px 20px 20px; box-sizing: border-box; }
         
         /* 💡 左サイド：目次リストも画面上部（ヘッダーのすぐ下）に追従してきれいに固定されるように配置 */
-        .sidebar { width: 280px; min-width: 280px; position: sticky; top: 480px; max-height: calc(100vh - 330px); overflow-y: auto; background: #fafafa; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
+	.sidebar { width: 280px; min-width: 280px; position: sticky; top: {{header_height}}; max-height: calc(100vh - 330px); overflow-y: auto; background: #fafafa; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
         .main-content {  flex-grow: 1; }
 
         .grid-1 { display: grid; grid-template-columns: 1fr; gap: 15px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
         .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        .graph-card { border: 1px solid #ddd; background-color: #fafafa; padding: 8px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 15px; scroll-margin-top: 480px; }
+	.graph-card { border: 1px solid #ddd; background-color: #fafafa; padding: 8px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 15px; scroll-margin-top: {{header_height}}; }
         .graph-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .graph-img { width: 100%; height: auto; display: block; background-color: #fff; }
         .btn-reg { padding: 2px 6px; font-size: 0.75em; cursor: pointer; }
