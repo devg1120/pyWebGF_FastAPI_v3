@@ -315,6 +315,11 @@
                                    border-radius: 4px;
                                    cursor: pointer">条件を更新</button>
                 </div>
+<!-- 💡 条件更新フォーム（<form> ~ </form>）の中の隠しパラメータを以下に差し替え -->
+<input type="hidden" id="form-open-popup" name="open_popup" value="{{ request.query_params.get('open_popup') or '' }}">
+<input type="hidden" id="form-popup-top" name="popup_top" value="{{ request.query_params.get('popup_top') or '' }}">
+<input type="hidden" id="form-popup-left" name="popup_left" value="{{ request.query_params.get('popup_left') or '' }}">
+
             </form>
             <!-- リアルタイム絞り込み入力欄 -->
             {% if csv_filenames %}
@@ -460,21 +465,56 @@
 </button>
 
 <!-- 💡 修正後：引数に 「, this」 を追加してください -->
+<!--
 <button class="popup-btn" onclick="openPopup('{{ loop.index }}', this)">🔲 別窓で開く</button>
+-->
+<button class="popup-btn" onclick="openPopup('{{ loop.index }}', '{{ filename }}', this)">🔲 別窓で開く</button>
+
 
                             </div>
-<!-- HTML内のループの中にあるポップアップ定義部分 -->
-<div id="popup-{{ loop.index }}" class="draggable-popup">
+
+<!-- 💡 各ポップアップの開始 div タグ（style属性）を以下のように書き換えます -->
+{% set popup_list = (request.query_params.get('open_popup') or '').split(',') %}
+{% set top_list = (request.query_params.get('popup_top') or '').split(',') %}
+{% set left_list = (request.query_params.get('popup_left') or '').split(',') %}
+
+{% set my_top = '150px' %}
+{% set my_left = '100px' %}
+
+<!-- 現在のポップアップが前回開かれていたか、位置リストの何番目にあるかを検索 -->
+{% if filename in popup_list %}
+    {% set my_idx = popup_list.index(filename) %}
+    {% if top_list|length > my_idx %}{% set my_top = top_list[my_idx] %}{% endif %}
+    {% if left_list|length > my_idx %}{% set my_left = left_list[my_idx] %}{% endif %}
+{% endif %}
+
+<div id="popup-{{ loop.index }}" class="draggable-popup" data-filename="{{ filename }}"
+     style="display: {% if filename in popup_list %}block{% else %}none{% endif %}; 
+            position: fixed; z-index: 9999; top: {{ my_top }}; left: {{ my_left }};">
+
+
+    
+    <!-- 💡 このヘッダーIDとクラス名が全域ドラッグの鍵になります -->
     <div class="popup-header" id="popup-header-{{ loop.index }}">
-	    <span class="popup-title"><span style="background-color:lightgray;"> {{ selected_switch}} </span> &nbsp; <span style="color: green;">{{ ns.interface }}</span> &nbsp; {{ ns.desc }}</span>
-        <button class="close-btn" onclick="closePopup('{{ loop.index }}')">✕ 閉じる</button>
+	    <!--
+        <span class="popup-title">{{ selected_switch }} {{ ns.interface }} {% if ns.desc %}({{ ns.desc }}){% endif %}</span>
+	    -->
+        <span class="popup-title">
+		<span style="background-color: #0080ff;color: #ffffff; padding: 0 5px;border-radius: 10px;"> {{ selected_switch }} </span>
+		&nbsp;
+		&nbsp;
+		<span style="color: #3399ff;" > {{ ns.interface }} </span>
+		&nbsp;
+		{% if ns.desc %}({{ ns.desc }}){% endif %}</span>
+        <button class="close-btn" onclick="document.getElementById('popup-{{ loop.index }}').style.display='none'">✕ 閉じる</button>
     </div>
-    <!-- 💡 BODYの中身を以下のように <img> に変更、または追加してください -->
-<div class="popup-body">
-    <img id="popup-img-{{ loop.index }}" src="" alt="グラフ拡大イメージ" style="width: 100%; height: 100%; object-fit: contain;">
+    
+    <div class="popup-body">
+        <img id="popup-img-{{ loop.index }}" src="/plot?base_id={{ selected_base_id }}&mode={{ current_mode }}&yyyymm={{ selected_yyyymm }}&dd={{ selected_dd }}&switch={{ selected_switch }}&filename={{ filename }}&cols={{ selected_cols }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ ns.desc|urlencode }}&speed={{ ns.speed|default('') }}&start_dd={{ selected_start_dd }}&end_dd={{ selected_end_dd }}" 
+             alt="グラフ画像" style="width: 100%; height: auto; display: block;">
+    </div>
 </div>
 
-</div>
 
                         {% endfor %}
                     </div>
@@ -724,7 +764,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <script>
 
-// 重なり順の管理（クリックしたウインドウを最前面にする）
+// 重なり順の管理（最前面に持ってくる）
 function bringToFront(selectedPopup) {
     document.querySelectorAll('.draggable-popup').forEach(p => {
         p.style.zIndex = "9998";
@@ -732,92 +772,133 @@ function bringToFront(selectedPopup) {
     selectedPopup.style.zIndex = "9999";
 }
 
-// 💡 エラーの原因だった「要素をドラッグ移動可能にする共通ロジック」をここに確実に定義します
-function makeElementDraggable(elmnt, header) {
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    if (header) {
-        header.onmousedown = dragMouseDown;
-    } else {
-        elmnt.onmousedown = dragMouseDown;
-    }
+// 💡【バグ修正版】現在画面上で開いているすべてのポップアップの状態と位置を一括スキャンしてフォームに同期
+function syncAllPopupsToForm() {
+    const openPopups = [];
+    const tops = [];
+    const lefts = [];
 
-    function dragMouseDown(e) {
-        e = e || window.event;
-        // 閉じるボタンをクリックした時はドラッグを開始しない
-        if (e.target.classList.contains('close-btn')) return;
-        e.preventDefault();
-        // マウスの初期位置を取得
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        document.onmouseup = closeDragElement;
-        document.onmousemove = elementDrag;
-    }
+    document.querySelectorAll('.draggable-popup').forEach(popup => {
+        // 💡 タイポ（.style.style.display）を修正し、安全に表示状態を判定します
+        if (popup.style.display === "block") {
+            const filename = popup.getAttribute('data-filename');
+            if (filename) {
+                openPopups.push(filename);
+                tops.push(popup.style.top || '150px');
+                lefts.push(popup.style.left || '100px');
+            }
+        }
+    });
 
-    function elementDrag(e) {
-        e = e || window.event;
-        e.preventDefault();
-        // マウスの移動量を計算
-        pos1 = pos3 - e.clientX;
-        pos2 = pos4 - e.clientY;
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        // 要素の新しい位置を設定
-        elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
-        elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
-    }
+    // 複数の値をカンマ区切りの文字列にして、上部フォームの各隠しパラメータに流し込みます
+    const formOpen = document.getElementById('form-open-popup');
+    const formTop = document.getElementById('form-popup-top');
+    const formLeft = document.getElementById('form-popup-left');
 
-    function closeDragElement() {
-        // マウスボタンが離されたらイベントを解除
-        document.onmouseup = null;
-        document.onmousemove = null;
+    if (formOpen && formTop && formLeft) {
+        formOpen.value = openPopups.join(',');
+        formTop.value = tops.join(',');
+        formLeft.value = lefts.join(',');
     }
 }
 
-// ポップアップを開く
-function openPopup(index, buttonEl) {
+// ─── 画面全体でのマウス常時監視型ドラッグロジック ───
+let activeDragEl = null;
+let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+
+document.addEventListener('mousedown', function(e) {
+    const header = e.target.closest('.popup-header');
+    if (!header) return;
+
+    // ✕ 閉じるボタンをクリックした時はドラッグを開始しない
+    if (e.target.classList.contains('close-btn') || e.target.tagName === 'BUTTON') return;
+
+    const popup = header.closest('.draggable-popup');
+    if (!popup) return;
+
+    e.preventDefault();
+    activeDragEl = popup;
+    bringToFront(popup);
+
+    pos3 = e.clientX;
+    pos4 = e.clientY;
+});
+
+document.addEventListener('mousemove', function(e) {
+    if (!activeDragEl) return;
+
+    e.preventDefault();
+    pos1 = pos3 - e.clientX;
+    pos2 = pos4 - e.clientY;
+    pos3 = e.clientX;
+    pos4 = e.clientY;
+
+    activeDragEl.style.top = (activeDragEl.offsetTop - pos2) + "px";
+    activeDragEl.style.left = (activeDragEl.offsetLeft - pos1) + "px";
+});
+
+// 💡 マウスボタンが離されたら確実にドラッグを終了させる
+document.addEventListener('mouseup', function() {
+    if (!activeDragEl) return;
+
+    // 移動完了した瞬間に、すべてのウインドウの配置位置をフォームへ一斉同期保存
+    syncAllPopupsToForm();
+    
+    // ドラッグ状態を完全にクリア（これでドラッグ状態が正常に終了します）
+    activeDragEl = null;
+});
+
+// ポップアップを開く（「別窓で開く」ボタンクリック時）
+function openPopup(index, filename) {
     const popup = document.getElementById(`popup-${index}`);
     if (!popup) return;
 
-    // すでに開いている場合は前面に持ってくる
-    if (popup.style.display === "block") {
-        bringToFront(popup);
-        return;
-    }
-
-    // 初期表示位置を画面中央付近に設定
     popup.style.display = "block";
-    popup.style.top = "150px";
-    popup.style.left = (50 + index * 10) + "px"; // 複数開いた時に少しずらす
-
-    // ドラッグ機能を有効化（これでエラーが解消されます）
-    makeElementDraggable(popup, document.getElementById(`popup-header-${index}`));
-
-    // 重なり順の管理
-    popup.addEventListener('mousedown', () => bringToFront(popup));
-
-    // 💡【確実な画像特定ロジック】
-    // ボタンの親要素（.graph-cardなど）の中から自動で元の <img> タグを見つけます
-    const cardContainer = buttonEl.closest('.graph-card') || buttonEl.parentNode;
-    const originalImg = cardContainer.querySelector('img');
-    const popupImg = document.getElementById(`popup-img-${index}`);
-
-    if (originalImg && popupImg) {
-        // メイン画面のグラフ画像のURLをポップアップへコピー
-        popupImg.src = originalImg.src;
+    popup.setAttribute('data-filename', filename); // ファイル名を属性に確実に保持
+    
+    // 最初のオープン時のみ初期表示位置を設定
+    if (!popup.style.top || popup.style.top === "") {
+        popup.style.top = "150px";
+        const openCount = Array.from(document.querySelectorAll('.draggable-popup')).filter(p => p.style.display === "block").length;
+        popup.style.left = (100 + openCount * 25) + "px";
     }
+
+    bringToFront(popup);
+    
+    // 開いた瞬間の新しい状態をフォームに即時マージして保存
+    syncAllPopupsToForm();
 }
 
-// ポップアップを閉じる
+// ポップアップを閉じる（✕ 閉じるボタンクリック時）
 function closePopup(index) {
     const popup = document.getElementById(`popup-${index}`);
     if (popup) {
         popup.style.display = "none";
-        const popupImg = document.getElementById(`popup-img-${index}`);
-        if (popupImg) {
-            popupImg.src = ""; // 閉じている間は読み込みをクリア
-        }
+        
+        // 閉じた後の最新状態をフォームに反映（送信リストから除外される）
+        syncAllPopupsToForm();
     }
 }
+
+// 画面クリック時にクリックしたポップアップを常に最前面に持ってくる処理
+document.addEventListener('click', function(e) {
+    const popup = e.target.closest('.draggable-popup');
+    if (popup) {
+        bringToFront(popup);
+    }
+});
+
+// ページロード完了時の初期化処理
+window.addEventListener('DOMContentLoaded', () => {
+    // サーバーから最初から表示対象（block）として出力されてきたすべてのウインドウを最前面管理に登録
+    document.querySelectorAll('.draggable-popup').forEach((popup) => {
+        if (popup.style.display === "block") {
+            bringToFront(popup);
+        }
+    });
+    // 現在の最新の選択情報をフォームにバックアップ
+    syncAllPopupsToForm();
+});
 
 </script>
 
