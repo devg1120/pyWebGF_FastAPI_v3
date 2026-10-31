@@ -38,6 +38,101 @@
         .graph-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .graph-img { width: 100%; height: auto; display: block; background-color: #fff; }
         .btn-reg { padding: 2px 6px; font-size: 0.75em; cursor: pointer; }
+
+
+/*
+.draggable-popup {
+    display: none; 
+    position: fixed;
+    z-index: 9999; 
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+    width: 600px;  
+    height: 450px; 
+    overflow: hidden;
+}
+*/
+
+.popup-header {
+    padding: 10px;
+    cursor: move; /* マウスカーソルを移動用に変更 */
+    background-color: #f1f1f1;
+    color: #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+    user-select: none; /* テキスト選択を無効化 */
+}
+
+.popup-title {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.close-btn {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.close-btn:hover {
+    background: #c0392b;
+}
+/*
+.popup-body {
+    padding: 15px;
+    height: calc(100% - 45px);
+    box-sizing: border-box;
+}
+*/
+
+/* ポップアップウィンドウのスタイル（高さ自動調整版） */
+.draggable-popup {
+    display: none; /* 初期状態は非表示 */
+    position: fixed;
+    z-index: 9999; /* 最前面に表示 */
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+    width: 600px;  /* 横幅は固定、またはお好みの幅に指定 */
+    
+    /* 💡 高さを中身（ヘッダー＋画像）にぴったりフィットさせる */
+    height: max-content; 
+    
+    overflow: hidden;
+}
+
+/* ポップアップ内部のグラフエリア（高さ自動調整版） */
+.popup-body {
+    padding: 15px;
+    
+    /* 💡 heightの計算を固定値ではなく「自動（中身依存）」にする */
+    height: auto; 
+    
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* ポップアップ内の画像スタイル */
+.popup-body img {
+    width: 100%;
+    
+    /* 💡 画像本来の縦横比を維持しながら高さを自動追従させる */
+    height: auto; 
+    
+    display: block;
+}
+
+
         </style>
     </head>
     <body>
@@ -363,7 +458,24 @@
 	data-desc="{{ ns.desc | trim }}">
     📸 スナップショット一時保存
 </button>
+
+<!-- 💡 修正後：引数に 「, this」 を追加してください -->
+<button class="popup-btn" onclick="openPopup('{{ loop.index }}', this)">🔲 別窓で開く</button>
+
                             </div>
+<!-- HTML内のループの中にあるポップアップ定義部分 -->
+<div id="popup-{{ loop.index }}" class="draggable-popup">
+    <div class="popup-header" id="popup-header-{{ loop.index }}">
+        <span class="popup-title">{{ ns.interface }} - 拡大</span>
+        <button class="close-btn" onclick="closePopup('{{ loop.index }}')">✕ 閉じる</button>
+    </div>
+    <!-- 💡 BODYの中身を以下のように <img> に変更、または追加してください -->
+<div class="popup-body">
+    <img id="popup-img-{{ loop.index }}" src="" alt="グラフ拡大イメージ" style="width: 100%; height: 100%; object-fit: contain;">
+</div>
+
+</div>
+
                         {% endfor %}
                     </div>
                 {% else %}
@@ -608,6 +720,105 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+</script>
+
+<script>
+
+// 重なり順の管理（クリックしたウインドウを最前面にする）
+function bringToFront(selectedPopup) {
+    document.querySelectorAll('.draggable-popup').forEach(p => {
+        p.style.zIndex = "9998";
+    });
+    selectedPopup.style.zIndex = "9999";
+}
+
+// 💡 エラーの原因だった「要素をドラッグ移動可能にする共通ロジック」をここに確実に定義します
+function makeElementDraggable(elmnt, header) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    if (header) {
+        header.onmousedown = dragMouseDown;
+    } else {
+        elmnt.onmousedown = dragMouseDown;
+    }
+
+    function dragMouseDown(e) {
+        e = e || window.event;
+        // 閉じるボタンをクリックした時はドラッグを開始しない
+        if (e.target.classList.contains('close-btn')) return;
+        e.preventDefault();
+        // マウスの初期位置を取得
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        document.onmouseup = closeDragElement;
+        document.onmousemove = elementDrag;
+    }
+
+    function elementDrag(e) {
+        e = e || window.event;
+        e.preventDefault();
+        // マウスの移動量を計算
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        // 要素の新しい位置を設定
+        elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+        elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+    }
+
+    function closeDragElement() {
+        // マウスボタンが離されたらイベントを解除
+        document.onmouseup = null;
+        document.onmousemove = null;
+    }
+}
+
+// ポップアップを開く
+function openPopup(index, buttonEl) {
+    const popup = document.getElementById(`popup-${index}`);
+    if (!popup) return;
+
+    // すでに開いている場合は前面に持ってくる
+    if (popup.style.display === "block") {
+        bringToFront(popup);
+        return;
+    }
+
+    // 初期表示位置を画面中央付近に設定
+    popup.style.display = "block";
+    popup.style.top = "150px";
+    popup.style.left = (50 + index * 10) + "px"; // 複数開いた時に少しずらす
+
+    // ドラッグ機能を有効化（これでエラーが解消されます）
+    makeElementDraggable(popup, document.getElementById(`popup-header-${index}`));
+
+    // 重なり順の管理
+    popup.addEventListener('mousedown', () => bringToFront(popup));
+
+    // 💡【確実な画像特定ロジック】
+    // ボタンの親要素（.graph-cardなど）の中から自動で元の <img> タグを見つけます
+    const cardContainer = buttonEl.closest('.graph-card') || buttonEl.parentNode;
+    const originalImg = cardContainer.querySelector('img');
+    const popupImg = document.getElementById(`popup-img-${index}`);
+
+    if (originalImg && popupImg) {
+        // メイン画面のグラフ画像のURLをポップアップへコピー
+        popupImg.src = originalImg.src;
+    }
+}
+
+// ポップアップを閉じる
+function closePopup(index) {
+    const popup = document.getElementById(`popup-${index}`);
+    if (popup) {
+        popup.style.display = "none";
+        const popupImg = document.getElementById(`popup-img-${index}`);
+        if (popupImg) {
+            popupImg.src = ""; // 閉じている間は読み込みをクリア
+        }
+    }
+}
+
 </script>
 
 
