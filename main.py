@@ -2476,8 +2476,6 @@ async def traffic_report_monthly(
 
 
 
-
-"""
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -2490,6 +2488,7 @@ async def traffic_report_monthly_page(
     start_hour: int = 8,
     end_hour: int = 18,
 ):
+    """【最速画面返却】重いロジックを一切挟まず、進捗表示用のスケルトン画面を即座に返す"""
     return templates.TemplateResponse(
         request=request,
         name="report_monthly2.html",
@@ -2504,15 +2503,16 @@ async def traffic_report_monthly_page(
 
 @app.websocket("/ws/report_monthly")
 async def ws_traffic_report_monthly(websocket: WebSocket):
+    """WebSocketを通じてリアルタイムに進捗を送りながらPandas計算を行う（一本化・即時ログ開始版）"""
     await websocket.accept()
-
-    # 💡 改善の核心: コネクト成立直後、重い処理を始める前に最初の進捗ログをフロントへ即座に送信
+    
+    # 💡 コネクト成立直後、重いフォルダ走査を始める前に最初の進捗ログをフロントへ即座に送信
     await websocket.send_json({
         "status": "progress",
         "progress": 0,
         "log": "🚀 サーバーとの接続が確立しました。初期化処理を開始します..."
     })
-
+    
     try:
         # 1. フロントからパラメータを受信
         params = await websocket.receive_json()
@@ -2521,10 +2521,10 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
         switch = params.get("switch")
         start_hour = int(params.get("start_hour", 8))
         end_hour = int(params.get("end_hour", 18))
-
+        
         actual_base = get_base_dir_path(base_id)
         month_dir = os.path.join(actual_base, yyyymm)
-
+        
         if not os.path.exists(month_dir):
             await websocket.send_json({"status": "error", "message": f"指定月のデータが見つかりません。({yyyymm})"})
             return
@@ -2536,7 +2536,7 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
             "log": f"📂 データソース（{yyyymm}）の日付ディレクトリを走査中..."
         })
 
-        # 💡 改善の核心2: 重いフォルダ走査とファイルマッピング構築を関数化し、スレッドプールで非同期に実行
+        # 重いフォルダ走査とファイルマッピング構築を関数化し、スレッドプールで非同期に実行
         def scan_and_map_directories():
             dd_dirs = sorted([d for d in glob.glob(os.path.join(month_dir, "*")) if os.path.isdir(d)])
             _port_files_map = {}
@@ -2547,17 +2547,14 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
                 if os.path.exists(sw_dir):
                     for f in glob.glob(os.path.join(sw_dir, "*.csv")):
                         fname = os.path.basename(f)
-                        if fname not in _port_files_map:
-                            _port_files_map[fname] = []
+                        if fname not in _port_files_map: _port_files_map[fname] = []
                         _port_files_map[fname].append(f)
-
                     info_json_path = os.path.join(sw_dir, "info.json")
                     if os.path.exists(info_json_path):
                         try:
                             with open(info_json_path, "r", encoding="utf-8") as inf:
                                 _info_dic.update(json.load(inf))
-                        except:
-                            pass
+                        except: pass
             return _port_files_map, _info_dic
 
         # I/Oブロッキングを回避しながらスキャンを実行
@@ -2567,64 +2564,81 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
             await websocket.send_json({"status": "error", "message": f"スイッチデータが見つかりません。({switch})"})
             return
 
-        # 同期用データ処理関数（1ポート分のPandas集計）
+        # 同期用データ処理関数（1ポート分のPandas集計 - 安全キャスト＆80%超のべ時間算出）
         def process_port(fname, paths):
-            df_list = []
-            for p in paths:
-                try:
-                    _df = pd.read_csv(p, engine="c")
-                    if not _df.empty: df_list.append(_df)
-                except: continue
-            if not df_list: return None
+            try:
+                df_list = []
+                for p in paths:
+                    try:
+                        _df = pd.read_csv(p, engine="c")
+                        if not _df.empty: df_list.append(_df)
+                    except: continue
+                if not df_list: return None
 
-            df = pd.concat(df_list, ignore_index=True)
-            if len(df.columns) >= 6:
-                df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
-            elif len(df.columns) >= 3:
-                df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
+                df = pd.concat(df_list, ignore_index=True)
+                if len(df.columns) >= 6:
+                    df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+                elif len(df.columns) >= 3:
+                    df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
 
-            df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
-            df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
-            df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
-            if df_filtered.empty: return None
+                df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
+                df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
+                df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
+                if df_filtered.empty: return None
 
-            time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
-            is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
-            df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
-            df_filtered.loc[is_missing, "差分A"] = None
-            df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
+                time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
+                is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
+                df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
+                df_filtered.loc[is_missing, "差分A"] = None
+                df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
 
-            if "項目B" in df_filtered.columns:
-                df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
-                df_filtered.loc[is_missing, "差分B"] = None
-                df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
-            else:
-                df_filtered["bps_B"] = 0
+                if "項目B" in df_filtered.columns:
+                    df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
+                    df_filtered.loc[is_missing, "差分B"] = None  # 💡 「差binB」から「差分B」へ修正
+                    df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300  # 💡 「差binB」から「差分B」へ修正
+                else:
+                    df_filtered["bps_B"] = 0
 
-            return {
-                "port_name": fname.replace(".csv", ""),
-                "filename": fname,
-                "max_in": (df_filtered["bps_A"].max() or 0) / 1_000_000,
-                "max_out": (df_filtered["bps_B"].max() or 0) / 1_000_000,
-                "avg_in": (df_filtered["bps_A"].mean() or 0) / 1_000_000,
-                "avg_out": (df_filtered["bps_B"].mean() or 0) / 1_000_000,
-                "total_in_gb": (df_filtered["差分A"].sum() or 0) / (1024 * 1024 * 1024),
-                "total_out_gb": (df_filtered["差分B"].sum() or 0) / (1024 * 1024 * 1024),
-                "desc": info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), "")
-            }
 
+                # ─── 📊 帯域使用率80%超 のべ時間算出 ───
+                over_80_mask = (df_filtered["bps_A"] > 800000000) | (df_filtered["bps_B"] > 800000000)
+                over_80_points = int(over_80_mask.sum())
+                over_80_minutes = over_80_points * 5
+
+                if over_80_minutes >= 60:
+                    over_80_time_str = f"{over_80_minutes // 60}時間{over_80_minutes % 60}分"
+                elif over_80_minutes > 0:
+                    over_80_time_str = f"{over_80_minutes}分"
+                else:
+                    over_80_time_str = "0分"
+
+                return {
+                    "port_name": str(fname.replace(".csv", "")),
+                    "filename": str(fname),
+                    "max_in": float(df_filtered["bps_A"].max() or 0.0) / 1_000_000,
+                    "max_out": float(df_filtered["bps_B"].max() or 0.0) / 1_000_000,
+                    "avg_in": float(df_filtered["bps_A"].mean() or 0.0) / 1_000_000,
+                    "avg_out": float(df_filtered["bps_B"].mean() or 0.0) / 1_000_000,
+                    "total_in_gb": float(df_filtered["差分A"].sum() or 0.0) / (1024 * 1024 * 1024),
+                    "total_out_gb": float(df_filtered["差分B"].sum() or 0.0) / (1024 * 1024 * 1024),
+                    "over_80_time": over_80_time_str,
+                    "desc": str(info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), ""))
+                }
+            except Exception as e:
+                print(f"❌ ポート {fname} の解析中にエラーが発生したためスキップします: {e}")
+                return None
+
+        # 2. ループを実行（古い重複コードブロックはすべて排除）
         sorted_ports = natsorted(list(port_files_map.keys()))
         total_ports = len(sorted_ports)
         report_data = []
 
-        # カタログ構築完了を通知
         await websocket.send_json({
-            "status": "progress",
-            "progress": 0,
+            "status": "progress", 
+            "progress": 0, 
             "log": f"📊 分析カタログの初期化完了。総ポート数: {total_ports} 件の集計を開始します。"
         })
 
-        # 1ポートずつループを回しながら、リアルタイムに進捗をフロントに送信
         for idx, fname in enumerate(sorted_ports, start=1):
             paths = port_files_map[fname]
             res = await run_in_threadpool(process_port, fname, paths)
@@ -2639,7 +2653,7 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
             })
             await asyncio.sleep(0.01)
 
-        # すべて完了したら最終データを送信
+        # 3. すべて完了したら最終データを送信
         await websocket.send_json({
             "status": "complete",
             "progress": 100,
@@ -2649,156 +2663,10 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
     except WebSocketDisconnect:
         print("Client disconnected.")
     except Exception as e:
+        traceback.print_exc()
         await websocket.send_json({"status": "error", "message": str(e)})
-"""
 
-import asyncio
-from fastapi import WebSocket, WebSocketDisconnect
 
-@app.get("/report_monthly2", response_class=HTMLResponse)
-async def traffic_report_monthly_page(
-    request: Request,
-    base_id: Optional[str] = None,
-    yyyymm: str = "",
-    switch: str = "",
-    start_hour: int = 8,
-    end_hour: int = 18,
-):
-    return templates.TemplateResponse(
-        request=request,
-        name="report_monthly2.html",
-        context={
-            "base_id": base_id or "default",
-            "yyyymm": yyyymm,
-            "switch": switch,
-            "start_hour": start_hour,
-            "end_hour": end_hour,
-        },
-    )
-
-@app.websocket("/ws/report_monthly")
-async def ws_traffic_report_monthly(websocket: WebSocket):
-    await websocket.accept()
-    
-    try:
-        # 1. 接続直後にブラウザから送られてくるパラメータを受け取る
-        params = await websocket.receive_json()
-        base_id = params.get("base_id")
-        yyyymm = params.get("yyyymm")
-        switch = params.get("switch")
-        start_hour = int(params.get("start_hour", 8))
-        end_hour = int(params.get("end_hour", 18))
-        
-        actual_base = get_base_dir_path(base_id)
-        month_dir = os.path.join(actual_base, yyyymm)
-        
-        if not os.path.exists(month_dir):
-            await websocket.send_json({"status": "error", "message": f"指定月のデータが見つかりません。({yyyymm})"})
-            return
-
-        dd_dirs = sorted([d for d in glob.glob(os.path.join(month_dir, "*")) if os.path.isdir(d)])
-        
-        port_files_map = {}
-        info_dic = {}
-        for d_dir in dd_dirs:
-            sw_dir = os.path.join(d_dir, switch)
-            if os.path.exists(sw_dir):
-                for f in glob.glob(os.path.join(sw_dir, "*.csv")):
-                    fname = os.path.basename(f)
-                    if fname not in port_files_map: port_files_map[fname] = []
-                    port_files_map[fname].append(f)
-                info_json_path = os.path.join(sw_dir, "info.json")
-                if os.path.exists(info_json_path):
-                    try:
-                        with open(info_json_path, "r", encoding="utf-8") as inf:
-                            info_dic.update(json.load(inf))
-                    except: pass
-
-        if not port_files_map:
-            await websocket.send_json({"status": "error", "message": f"スイッチデータが見つかりません。({switch})"})
-            return
-
-        # 同期用処理関数
-        def process_port(fname, paths):
-            df_list = []
-            for p in paths:
-                try:
-                    _df = pd.read_csv(p, engine="c")
-                    if not _df.empty: df_list.append(_df)
-                except: continue
-            if not df_list: return None
-            
-            df = pd.concat(df_list, ignore_index=True)
-            if len(df.columns) >= 6:
-                df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
-            elif len(df.columns) >= 3:
-                df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
-                
-            df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
-            df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
-            df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
-            if df_filtered.empty: return None
-            
-            time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
-            is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
-            df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
-            df_filtered.loc[is_missing, "差分A"] = None
-            df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
-            
-            if "項目B" in df_filtered.columns:
-                df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
-                df_filtered.loc[is_missing, "差分B"] = None
-                df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
-            else:
-                df_filtered["bps_B"] = 0
-                
-            return {
-                "port_name": fname.replace(".csv", ""),
-                "filename": fname,
-                "max_in": (df_filtered["bps_A"].max() or 0) / 1_000_000,
-                "max_out": (df_filtered["bps_B"].max() or 0) / 1_000_000,
-                "avg_in": (df_filtered["bps_A"].mean() or 0) / 1_000_000,
-                "avg_out": (df_filtered["bps_B"].mean() or 0) / 1_000_000,
-                "total_in_gb": (df_filtered["差分A"].sum() or 0) / (1024 * 1024 * 1024),
-                "total_out_gb": (df_filtered["差分B"].sum() or 0) / (1024 * 1024 * 1024),
-                "desc": info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), "")
-            }
-
-        # 4. 【リアルタイムコア】ループを回しながら、1件ずつ進捗率をフロントに送信
-        sorted_ports = natsorted(list(port_files_map.keys()))
-        total_ports = len(sorted_ports)
-        report_data = []
-
-        await websocket.send_json({"status": "progress", "progress": 0, "log": f"分析カタログの初期化完了。総ポート数: {total_ports}"})
-
-        for idx, fname in enumerate(sorted_ports, start=1):
-            paths = port_files_map[fname]
-            # 1ポートの計算を同期プールで実行
-            res = await run_in_threadpool(process_port, fname, paths)
-            if res:
-                report_data.append(res)
-            
-            # 進捗パーセンテージの計算
-            percent = int((idx / total_ports) * 100)
-            await websocket.send_json({
-                "status": "progress",
-                "progress": percent,
-                "log": f"[{idx}/{total_ports}] ポート {fname.replace('.csv','')} の集計が完了しました。"
-            })
-            # ネットワーク過密防止のわずかなウェイト
-            await asyncio.sleep(0.01)
-
-        # 5. すべて完了したら最終データを一括送信
-        await websocket.send_json({
-            "status": "complete",
-            "progress": 100,
-            "data": report_data
-        })
-
-    except WebSocketDisconnect:
-        print("Client disconnected.")
-    except Exception as e:
-        await websocket.send_json({"status": "error", "message": str(e)})
 
 
 
