@@ -1676,6 +1676,7 @@ async def timeseries_board3(
     logic: str = "stat_threshold",
     start_hour: int = 8,
     end_hour: int = 18,
+    timescale: str = "day",  # 💡 日(day)・週(week)・月(month)の切り替えパラメータを追加
 ):
     if not base_id:
         base_id = get_default_base_id()
@@ -1683,29 +1684,27 @@ async def timeseries_board3(
     date_tree = get_date_tree(base_id)
 
     if start_dd:
-        start_dd = start_dd.replace("/", "-")  # YYYY-MM-DD 形式に統一
+        start_dd = start_dd.replace("/", "-")
     if end_dd:
         end_dd = end_dd.replace("/", "-")
 
-    # ─── 1. 選択肢をスキャンするためのフォルダ探索（既存ロジック） ───
+    # ─── 1. 選択肢スキャン用のフォルダ探索（既存のロジックを踏襲） ───
     scan_date_dirs = []
     if start_dd:
         try:
-            # pd.to_datetime はハイフン区切り(YYYY-MM-DD)を自動で正しくパースしてくれます
             p_date = pd.to_datetime(start_dd)
             scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), p_date.strftime("%d")))
             scan_date_dirs.append(os.path.join(actual_base, p_date.strftime("%Y%m"), str(p_date.day)))
         except:
             pass
     
-    # 期間指定がない場合や補完のため、最新のデータ構造を直近5日分スキャン
     for ym, dds in reversed(list(date_tree.items())):
         for d in reversed(dds):
             scan_date_dirs.append(os.path.join(actual_base, ym, d))
             if len(scan_date_dirs) > 5:
                 break
 
-    # ─── 2. データソース内の「全スイッチ ✕ 全ポート」構造をスキャンしてカタログ化 ───
+    # ─── 2. データソース内のスイッチ・ポート構造カタログ化（既存ロジック） ───
     full_switch_manifest = {}
     for d_dir in scan_date_dirs:
         if os.path.exists(d_dir):
@@ -1731,50 +1730,59 @@ async def timeseries_board3(
     for sw_name in full_switch_manifest:
         full_switch_manifest[sw_name]["ports"] = natsorted(list(full_switch_manifest[sw_name]["ports"]))
 
-    # ─── 3. クエリパラメータ（target_pairs）から複数選択された値をパース ───
+    # ─── 3. クエリパラメータからの選択ポートパース（既存ロジック） ───
     raw_targets = request.query_params.getlist("target_pairs")
-    
     selected_pairs = []
     for rt in raw_targets:
         if "::" in rt:
             sw_part, fn_part = rt.split("::", 1)
             selected_pairs.append({"switch": sw_part, "filename": fn_part, "raw": rt})
-            
-    # 最大5ポートまでに制限
-    #selected_pairs = selected_pairs[:5]    #MAX
 
-    # デフォルトの初期選択状態（何も選ばれていない場合）
-    #if not selected_pairs and all_switches:
-    #    first_sw = all_switches[0]
-    #    first_ports = full_switch_manifest[first_sw]["ports"]
-    #    if first_ports:
-    #        selected_pairs.append({
-    #            "switch": first_sw, 
-    #            "filename": first_ports[0], 
-    #            "raw": f"{first_sw}::{first_ports[0]}"
-    #        })
-
-    # ─── 4. 指定された期間内の日付リストを生成 ───
+    # ─── 💡 4. 【核心機能】タイムスケール（表示単位）に応じた縦軸オブジェクト群の動的生成 ───
     target_days = []
     weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
+    
     if start_dd and end_dd:
         try:
+            # 指定された全期間の日付インデックスを生成
             date_range = pd.date_range(start=start_dd, end=end_dd)
-            for d in date_range:
-                ym_dir = d.strftime("%Y%m")
-                d_double = d.strftime("%d")
-                d_single = str(d.day)
-
-                target_days.append({
-                    "yyyymm": ym_dir,
-                    "dd_double": d_double,
-                    "dd_single": d_single,
-                    "formatted": d.strftime("%Y-%m-%d"),
-                    "weekdays_jp": weekdays_jp[d.weekday()],
-                    "weekdays_index": d.weekday(),
-                })
+            df_dr = pd.DataFrame({"date": date_range})
+            
+            if timescale == "month":
+                # 月単位のグルーピング処理
+                grouped = df_dr.groupby(df_dr["date"].dt.to_period("M"))
+                for period, group in grouped:
+                    s_day = group["date"].min()
+                    e_day = group["date"].max()
+                    target_days.append({
+                        "label": f"📅 {period.year}年 {period.month}月期 マージ推移",
+                        "start_dd": s_day.strftime("%Y-%m-%d"),
+                        "end_dd": e_day.strftime("%Y-%m-%d")
+                    })
+            elif timescale == "week":
+                # 週単位のグルーピング処理（日曜区切りを基準に週の初日・最終日を算出）
+                grouped = df_dr.groupby(df_dr["date"].dt.to_period("W-SUN"))
+                for period, group in grouped:
+                    s_day = group["date"].min()
+                    e_day = group["date"].max()
+                    week_num = (s_day.day - 1) // 7 + 1
+                    target_days.append({
+                        "label": f"📆 {s_day.month}月 第{week_num}週 ({s_day.strftime('%m/%d')} ～ {e_day.strftime('%m/%d')})",
+                        "start_dd": s_day.strftime("%Y-%m-%d"),
+                        "end_dd": e_day.strftime("%Y-%m-%d")
+                    })
+            else:
+                # 従来通りの「日（Day）」単位
+                for d in date_range:
+                    formatted_str = d.strftime("%Y-%m-%d")
+                    target_days.append({
+                        "label": f"⏱️ {formatted_str} ({weekdays_jp[d.weekday()]})",
+                        "start_dd": formatted_str,
+                        "end_dd": formatted_str
+                    })
         except Exception as e:
-            print(f"日付リスト生成エラー: {e}")
+            print(f"縦軸期間リスト生成エラー: {e}")
+            traceback.print_exc()
 
     return templates.TemplateResponse(
         request=request,
@@ -1793,7 +1801,8 @@ async def timeseries_board3(
             "selected_logic": logic,
             "start_hour": int(start_hour),
             "end_hour": int(end_hour),
-            "target_days": target_days,
+            "selected_timescale": timescale,  # 💡 選択状態をコンテキストへ追加
+            "target_days": target_days,       # 💡 タイムスケールで形が変わった不変配列をバインド
         },
     )
 
