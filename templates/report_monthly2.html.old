@@ -3,207 +3,189 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>月間トラフィック分析レポート 2 - {{ switch }}</title>
-    <!--
-    <link href="https://jsdelivr.net" rel="stylesheet">
-    -->
-
-    <link href="/static/css/bootstrap-5.3.8-dist/css/bootstrap.css" rel="stylesheet" />
-
+    <title>月間トラフィック分析レポート2 - {{ switch }}</title>
     <style>
-        body { background-color: #f4f6f9; font-size: 0.9rem; }
-        .report-wrapper { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .table th { background-color: #343a40; color: white; white-space: nowrap; vertical-align: middle; }
-        .metric-val { font-family: 'Courier New', Courier, monospace; text-align: right; }
-        #log-monitor { background-color: #1e1e1e; color: #00ff00; font-family: monospace; font-size: 0.8rem; max-height: 150px; overflow-y: auto; padding: 10px; border-radius: 6px; }
-        @media print {
-            .no-print { display: none; }
-            body { background: white; }
-            .report-wrapper { box-shadow: none; padding: 0 !important; }
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; color: #212529; margin: 20px; line-height: 1.5; }
+        .container { max-width: 1300px; margin: 0 auto; padding: 0 15px; }
+        .loading-box { background: #fff; padding: 30px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; border: 1px solid #dee2e6; }
+        .progress-bar-container { background: #e9ecef; border-radius: 4px; height: 22px; width: 100%; margin: 20px 0; overflow: hidden; }
+        .progress-bar { background: #28a745; height: 100%; width: 0%; transition: width 0.15s ease-in-out; }
+        .log-area { background: #212529; color: #28a745; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; padding: 15px; border-radius: 4px; height: 200px; overflow-y: auto; font-size: 13px; line-height: 1.6; border: 1px solid #343a40; text-align: left; }
+        .hidden { display: none !important; }
+        
+        /* 元通りのシンプルな1カラム高精細テーブル */
+        table { width: 100%; border-collapse: collapse; margin-top: 25px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
+        th, td { border: 1px solid #dee2e6; padding: 12px 14px; vertical-align: middle; }
+        th { background-color: #f1f3f5; font-weight: 600; text-align: center; font-size: 14px; }
+        tr:nth-of-type(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #f1f3f5; }
+        
+        .btn-sm-custom { display: inline-block; font-weight: 400; color: #007bff; text-align: center; vertical-align: middle; user-select: none; background-color: transparent; border: 1px solid #007bff; padding: .25rem .5rem; font-size: .875rem; line-height: 1.5; border-radius: .2rem; text-decoration: none; transition: all 0.15s ease-in-out; }
+        .btn-sm-custom:hover { color: #fff; background-color: #007bff; border-color: #007bff; }
+        
+        h2 { font-size: 1.75rem; margin-bottom: .5rem; font-weight: 500; line-height: 1.2; color: #343a40; }
+        .text-muted { color: #6c757d!important; font-size: 13px; }
     </style>
 </head>
 <body>
-    <div class="container-fluid my-4">
-        <!-- 上部ナビ（初期状態は非表示） -->
-        <div id="print-controls" class="d-flex justify-content-between align-items-center mb-3 no-print mx-3" style="display: none !important;">
-            <a href="javascript:history.back()" class="btn btn-sm btn-secondary">⬅ 戻る</a>
-            <button onclick="window.print()" class="btn btn-sm btn-primary">🖨️ レポートを印刷 / PDF出力</button>
+    <div class="container">
+        <!-- ⏳ 元デザインのローディング画面 -->
+        <div id="loading-screen" class="loading-box">
+            <h4 id="status-title" style="margin-top:0; color:#495057;">⏳ 1ヶ月分の大容量トラフィックデータを解析中...</h4>
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div id="progress-text" style="font-size: 18px; font-weight: bold; color:#212529; margin-bottom: 15px;">0%</div>
+            <div id="log-area" class="log-area">画面を初期化中...</div>
         </div>
 
-        <!-- 1. 【進捗表示UIパネル】 -->
-        <div id="progress-panel" class="card m-3 p-4 shadow-sm">
-            <h5 class="fw-bold mb-3">⏳ 1ヶ月分の大容量トラフィックデータを解析中...</h5>
-            <div class="progress mb-3" style="height: 25px;">
-                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning text-dark fw-bold" 
-                     role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
-            </div>
-            <div id="log-monitor" class="mt-2">WebSocketの接続を確立しています...</div>
-        </div>
-
-        <!-- 2. 【レポート本体（データ受信完了まで非表示）】 -->
-        <div id="report-content" class="p-4 report-wrapper mx-2" style="display: none;">
-            <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
-                <div>
-                    <h2 class="fw-bold text-dark mb-1">📅 月間トラフィック分析レポート2</h2>
-                    <p class="text-muted mb-0">対象機器: <span class="badge bg-dark fs-6">{{ switch }}</span></p>
-                </div>
-                <div class="text-end text-muted">
-                    <div>対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong></div>
-                    <div>集計時間帯: {{ start_hour }}:00 ～ {{ end_hour }}:55</div>
-                </div>
-            </div>
-
-            <div class="table-responsive">
-                <table class="table table-bordered table-striped table-hover align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th rowspan="2" class="text-center">ポート名</th>
-                            <th rowspan="2" class="text-center">説明 (用途)</th>
-                            <th colspan="2" class="text-center bg-danger">最大（ピーク）速度 (Mbps)</th>
-                            <th colspan="2" class="text-center bg-success">平均通信速度 (Mbps)</th>
-                            <th colspan="2" class="text-center bg-info text-dark">総転送量 (GB)</th>
-                            <th rowspan="2" style="background-color: #ffeaea; color: #cc0000; text-align: center; vertical-align: middle;">⚠️ 80%超のべ時間</th>
-
-                            <th rowspan="2" class="text-center no-print">詳細</th>
-                        </tr>
-                        <tr>
-                            <th class="text-center bg-opacity-10 bg-danger text-danger">In</th>
-                            <th class="text-center bg-opacity-10 bg-danger text-danger">Out</th>
-                            <th class="text-center bg-opacity-10 bg-success text-success">In</th>
-                            <th class="text-center bg-opacity-10 bg-success text-success">Out</th>
-                            <th class="text-center bg-opacity-10 bg-info text-dark">Inbound</th>
-                            <th class="text-center bg-opacity-10 bg-info text-dark">Outbound</th>
-                        </tr>
-                    </thead>
-                    <tbody id="report-table-body">
-                        <!-- 続きの2本目のコードへ接続します -->
-
-                    <!-- 1本目の tbody タグの内側からスタート -->
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="mt-4 pt-3 border-top d-flex justify-content-between text-muted small">
-                <span>※ 欠損値（330秒以上のデータギャップ）は集計の計算対象から除外されています。</span>
-                <span>SNMP トラフィックモニター バッチシステム</span>
-            </div>
+        <!-- 📅 元デザインの1カラムレポート結果画面 -->
+        <div id="report-screen" class="hidden">
+            <h2>📅 月間トラフィック analysis レポート2</h2>
+            <p style="font-size: 15px; margin-bottom: 20px;">
+                対象機器: <strong style="color:#007bff;">{{ switch }}</strong> | 
+                対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong> | 
+                集計時間帯: <span style="background:#e9ecef; padding:2px 6px; border-radius:4px;">{{ start_hour }}:00 ～ {{ end_hour }}:55</span>
+            </p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 120px;">ポート名</th>
+                        <th rowspan="2">説明 (用途)</th>
+                        <th colspan="2">最大（ピーク）速度 (Mbps)</th>
+                        <th colspan="2">平均通信速度 (Mbps)</th>
+                        <th colspan="2">総転送量 (GB)</th>
+                        <th rowspan="2" style="background-color: #fff0f0; color: #cc0000; width: 140px;">⚠️ 80%超のべ時間</th>
+                        <th rowspan="2" style="width: 80px;">詳細</th>
+                    </tr>
+                    <tr>
+                        <th style="width: 85px;">In</th>
+                        <th style="width: 85px;">Out</th>
+                        <th style="width: 85px;">In</th>
+                        <th style="width: 85px;">Out</th>
+                        <th style="width: 100px;">Inbound</th>
+                        <th style="width: 100px;">Outbound</th>
+                    </tr>
+                </thead>
+                <tbody id="report-tbody"></tbody>
+            </table>
+            <p class="text-muted" style="margin-top: 15px;">※ 欠損値（330秒以上のデータギャップ）は集計の計算対象から除外されています。</p>
         </div>
     </div>
-
-    <!-- リアルタイムWebSocket通信スクリプト -->
     <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            const loc = window.location;
-            const wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${wsProtocol}//${loc.host}/ws/report_monthly`;
-            
-            const ws = new WebSocket(wsUrl);
-            
-            const progressBar = document.getElementById("progress-bar");
-            const logMonitor = document.getElementById("log-monitor");
-            const progressPanel = document.getElementById("progress-panel");
-            const reportContent = document.getElementById("report-content");
-            const printControls = document.getElementById("print-controls");
-            const tableBody = document.getElementById("report-table-body");
+        const CONFIG = {
+            baseId: "{{ base_id }}",
+            yyyymm: "{{ yyyymm }}",
+            switch: "{{ switch }}",
+            startHour: parseInt("{{ start_hour }}") || 8,
+            endHour: parseInt("{{ end_hour }}") || 18
+        };
 
-            ws.onopen = function() {
-                logMonitor.innerHTML += "<br>▶ サーバーに集計パラメータを送信しました。";
+        window.addEventListener('DOMContentLoaded', () => {
+            const logArea = document.getElementById('log-area');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+
+            function appendLog(text) {
+                const p = document.createElement('p');
+                p.style.margin = '0 0 5px 0';
+                p.textContent = text;
+                logArea.appendChild(p);
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+
+            appendLog("🔌 WebSocket接続を開始します...");
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/report_monthly`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                appendLog("✅ サーバーとの接続に成功しました。パラメータを要求中...");
                 ws.send(JSON.stringify({
-                    "base_id": "{{ base_id }}",
-                    "yyyymm": "{{ yyyymm }}",
-                    "switch": "{{ switch }}",
-                    "start_hour": "{{ start_hour }}",
-                    "end_hour": "{{ end_hour }}"
+                    base_id: CONFIG.baseId,
+                    yyyymm: CONFIG.yyyymm,
+                    switch: CONFIG.switch,
+                    start_hour: CONFIG.startHour,
+                    end_hour: CONFIG.endHour
                 }));
             };
 
-            ws.onmessage = function(event) {
-                const msg = JSON.parse(event.data);
-                
-                if (msg.status === "progress") {
-                    progressBar.style.width = msg.progress + "%";
-                    progressBar.innerText = msg.progress + "%";
-                    logMonitor.innerHTML += `<br> ${msg.log}`;
-                    logMonitor.scrollTop = logMonitor.scrollHeight;
-                    
-} else if (response.status === 'complete') {
-    appendLog("🎉 すべての解析が完了しました！画面をレンダリングします。");
-    document.getElementById('loading-screen').classList.add('hidden');
-    
-    const tbody = document.getElementById('report-tbody');
-    response.data.forEach(row => {
-        const tr = document.createElement('tr');
-        // 0分以外（帯域逼迫が発生しているポート）は、文字を太字の赤にして警告
-        const timeStyle = row.over_80_time !== "0分" ? 'style="color: red; font-weight: bold; text-align: center;"' : 'style="text-align: center;"';
-        
-        tr.innerHTML = `
-            <td>${row.port_name}</td>
-            <td>${row.desc || ''}</td>
-            <td style="text-align: right;">${row.max_in.toFixed(2)}</td>
-            <td style="text-align: right;">${row.max_out.toFixed(2)}</td>
-            <td style="text-align: right;">${row.avg_in.toFixed(2)}</td>
-            <td style="text-align: right;">${row.avg_out.toFixed(2)}</td>
-            <td style="text-align: right;">${row.total_in_gb.toFixed(2)}</td>
-            <td style="text-align: right;">${row.total_out_gb.toFixed(2)}</td>
-            <td ${timeStyle}>${row.over_80_time}</td>
-            <td style="text-align: center;"><a href="/report?base_id=${CONFIG.baseId}&yyyymm=${CONFIG.yyyymm}&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}" class="btn">表示</a></td>
-        `;
-        tbody.appendChild(tr);
-    });
-    document.getElementById('report-screen').classList.remove('hidden');
-    ws.close();
-}
+            ws.onmessage = (event) => {
+                try {
+                    const response = JSON.parse(event.data);
 
+                    if (response.status === 'progress') {
+                        progressBar.style.width = response.progress + '%';
+                        progressText.textContent = response.progress + '%';
+                        if (response.log) appendLog(response.log);
+                    } 
+                    else if (response.status === 'complete') {
+                        appendLog("🎉 全ポートの解析データを受信しました。テーブルをレンダリングします。");
+                        
+                        const tbody = document.getElementById('report-tbody');
+                        tbody.innerHTML = "";
+                        
+                        // 💡 該当月の1日から月末日（末日自動計算）までの期間指定パラメータを生成
+                        const year = parseInt(CONFIG.yyyymm.substring(0, 4));
+                        const month = parseInt(CONFIG.yyyymm.substring(4, 6));
+                        const lastDay = new Date(year, month, 0).getDate(); // JavaScriptで月末日を取得
+                        
+                        const start_dd = `${year}-${String(month).padStart(2, '0')}-01`;
+                        const end_dd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-} else if (response.status === 'complete') {
-    appendLog("🎉 すべての解析が完了しました！画面をレンダリングします。");
-    document.getElementById('loading-screen').classList.add('hidden');
-    
-    const tbody = document.getElementById('report-tbody');
-    response.data.forEach(row => {
-        const tr = document.createElement('tr');
-        
-        // 💡 現行の表のスタイルを踏襲しつつ、0分以外（帯域逼迫発生）の時は赤文字警告のスタイル属性を動的に付与
-        const timeStyle = row.over_80_time !== "0分" ? 'style="color: #cc0000; font-weight: bold; text-align: center;"' : 'style="text-align: center;"';
-        
-        tr.innerHTML = `
-            <td>${row.port_name}</td>
-            <td>${row.desc || ''}</td>
-            <td style="text-align: right;">${row.max_in.toFixed(2)}</td>
-            <td style="text-align: right;">${row.max_out.toFixed(2)}</td>
-            <td style="text-align: right;">${row.avg_in.toFixed(2)}</td>
-            <td style="text-align: right;">${row.avg_out.toFixed(2)}</td>
-            <td style="text-align: right;">${row.total_in_gb.toFixed(2)}</td>
-            <td style="text-align: right;">${row.total_out_gb.toFixed(2)}</td>
-            <!-- 💡 追加項目 -->
-            <td ${timeStyle}>${row.over_80_time}</td>
-            <!-- 💡 現行の「詳細 / 表示」リンクのクラスと構造を踏襲 -->
-            <td style="text-align: center;">
-                <a href="/report?base_id=${CONFIG.baseId}&yyyymm=${CONFIG.yyyymm}&dd=01&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}" class="btn btn-sm btn-outline-primary">表示</a>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-    document.getElementById('report-screen').classList.remove('hidden');
-    ws.close();
-}
+                        if (!response.data || response.data.length === 0) {
+                            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:red; padding:20px;">有効なデータをもつポートが見つかりませんでした。</td></tr>`;
+                        } else {
+                            response.data.forEach(row => {
+                                const tr = document.createElement('tr');
+                                
+                                const timeStyle = row.over_80_time !== "0分" 
+                                    ? 'style="color: #cc0000; font-weight: 700; text-align: center; background-color: #fff0f0;"' 
+                                    : 'style="text-align: center; color: #495057;"';
+                                
+                                const maxIn = typeof row.max_in === 'number' ? row.max_in.toFixed(2) : '0.00';
+                                const maxOut = typeof row.max_out === 'number' ? row.max_out.toFixed(2) : '0.00';
+                                const avgIn = typeof row.avg_in === 'number' ? row.avg_in.toFixed(2) : '0.00';
+                                const avgOut = typeof row.avg_out === 'number' ? row.avg_out.toFixed(2) : '0.00';
+                                const totalIn = typeof row.total_in_gb === 'number' ? row.total_in_gb.toFixed(2) : '0.00';
+                                const totalOut = typeof row.total_out_gb === 'number' ? row.total_out_gb.toFixed(2) : '0.00';
 
-
-                    
-                } else if (msg.status === "error") {
-                    progressBar.className = "progress-bar bg-danger text-white";
-                    progressBar.innerText = "エラー発生";
-                    logMonitor.innerHTML += `<br><span class='text-danger'>❌ エラー: ${msg.message}</span>`;
-                    ws.close();
+                                tr.innerHTML = `
+                                    <td><strong>${row.port_name}</strong></td>
+                                    <td style="color:#495057; font-size:13px;">${row.desc || ''}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxOut}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgOut}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalOut}</td>
+                                    <td ${timeStyle}>${row.over_80_time || '0分'}</td>
+                                    <td style="text-align: center;">
+                                        <a href="/plot?base_id=${CONFIG.baseId}&mode=range&start_dd=${start_dd}&end_dd=${end_dd}&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}&cols=1" class="btn-sm-custom" target="_blank">表示</a>
+                                    </td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        }
+                        
+                        document.getElementById('loading-screen').classList.add('hidden');
+                        document.getElementById('report-screen').classList.remove('hidden');
+                        ws.close();
+                    } 
+                    else if (response.status === 'error') {
+                        appendLog("❌ サーバーエラー: " + response.message);
+                        ws.close();
+                    }
+                } catch (err) {
+                    appendLog("❌ JS描画エラー: " + err.message);
                 }
             };
 
-            ws.onerror = function(err) {
-                logMonitor.innerHTML += "<br><span class='text-danger'>❌ WebSocket通信エラーが発生しました。</span>";
-            };
+            ws.onerror = () => appendLog("❌ WebSocket通信エラーが発生しました。");
+            ws.onclose = () => appendLog("🔌 セッションがクローズされました。");
         });
     </script>
 </body>
 </html>
-

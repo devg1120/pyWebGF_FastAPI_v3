@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月間トラフィック分析レポート2 - {{ switch }}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8f9fa; color: #212529; margin: 20px; line-height: 1.5; }
+        .container { max-width: 1300px; margin: 0 auto; padding: 0 15px; }
+        .loading-box { background: #fff; padding: 30px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; border: 1px solid #dee2e6; }
+        .progress-bar-container { background: #e9ecef; border-radius: 4px; height: 22px; width: 100%; margin: 20px 0; overflow: hidden; }
+        .progress-bar { background: #28a745; height: 100%; width: 0%; transition: width 0.15s ease-in-out; }
+        .log-area { background: #212529; color: #28a745; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; padding: 15px; border-radius: 4px; height: 200px; overflow-y: auto; font-size: 13px; line-height: 1.6; border: 1px solid #343a40; text-align: left; }
+        .hidden { display: none !important; }
+        
+        /* 元通りのシンプルな1カラム高精細テーブル */
+        table { width: 100%; border-collapse: collapse; margin-top: 25px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
+        th, td { border: 1px solid #dee2e6; padding: 12px 14px; vertical-align: middle; }
+        th { background-color: #f1f3f5; font-weight: 600; text-align: center; font-size: 14px; }
+        tr:nth-of-type(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #f1f3f5; }
+        
+        .btn-sm-custom { display: inline-block; font-weight: 400; color: #007bff; text-align: center; vertical-align: middle; user-select: none; background-color: transparent; border: 1px solid #007bff; padding: .25rem .5rem; font-size: .875rem; line-height: 1.5; border-radius: .2rem; text-decoration: none; transition: all 0.15s ease-in-out; }
+        .btn-sm-custom:hover { color: #fff; background-color: #007bff; border-color: #007bff; }
+        
+        h2 { font-size: 1.75rem; margin-bottom: .5rem; font-weight: 500; line-height: 1.2; color: #343a40; }
+        .text-muted { color: #6c757d!important; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- ⏳ 元デザインのローディング画面 -->
+        <div id="loading-screen" class="loading-box">
+            <h4 id="status-title" style="margin-top:0; color:#495057;">⏳ 1ヶ月分の大容量トラフィックデータを解析中...</h4>
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div id="progress-text" style="font-size: 18px; font-weight: bold; color:#212529; margin-bottom: 15px;">0%</div>
+            <div id="log-area" class="log-area">画面を初期化中...</div>
+        </div>
+
+        <!-- 📅 元デザインの1カラムレポート結果画面 -->
+        <div id="report-screen" class="hidden">
+            <h2>📅 月間トラフィック analysis レポート2</h2>
+            <p style="font-size: 15px; margin-bottom: 20px;">
+                対象機器: <strong style="color:#007bff;">{{ switch }}</strong> | 
+                対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong> | 
+                集計時間帯: <span style="background:#e9ecef; padding:2px 6px; border-radius:4px;">{{ start_hour }}:00 ～ {{ end_hour }}:55</span>
+            </p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 120px;">ポート名</th>
+                        <th rowspan="2">説明 (用途)</th>
+                        <th colspan="2">最大（ピーク）速度 (Mbps)</th>
+                        <th colspan="2">平均通信速度 (Mbps)</th>
+                        <th colspan="2">総転送量 (GB)</th>
+                        <th rowspan="2" style="background-color: #fff0f0; color: #cc0000; width: 140px;">⚠️ 80%超のべ時間</th>
+                        <th rowspan="2" style="background-color: #fffaf0; color: #b15b00; width: 110px;">🔥 バースト回数<br><small>(30分超)</small></th>
+                        <th rowspan="2" style="background-color: #f0f5ff; color: #0056b3; width: 110px;">💤 無通信回数<br><small>(30分超)</small></th>
+
+                        <th rowspan="2" style="width: 80px;">詳細</th>
+                    </tr>
+                    <tr>
+                        <th style="width: 85px;">In</th>
+                        <th style="width: 85px;">Out</th>
+                        <th style="width: 85px;">In</th>
+                        <th style="width: 85px;">Out</th>
+                        <th style="width: 100px;">Inbound</th>
+                        <th style="width: 100px;">Outbound</th>
+                    </tr>
+                </thead>
+                <tbody id="report-tbody"></tbody>
+            </table>
+            <p class="text-muted" style="margin-top: 15px;">※ 欠損値（330秒以上のデータギャップ）は集計の計算対象から除外されています。</p>
+        </div>
+    </div>
+   <script>
+        const CONFIG = {
+            baseId: "{{ base_id }}",
+            yyyymm: "{{ yyyymm }}",
+            switch: "{{ switch }}",
+            startHour: parseInt("{{ start_hour }}") || 8,
+            endHour: parseInt("{{ end_hour }}") || 18
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const logArea = document.getElementById('log-area');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+
+            function appendLog(text) {
+                const p = document.createElement('p');
+                p.style.margin = '0 0 5px 0';
+                p.textContent = text;
+                logArea.appendChild(p);
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+
+            appendLog("🔌 WebSocket接続を開始します...");
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/report_monthly`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                appendLog("✅ サーバーとの接続に成功しました。パラメータを要求中...");
+                ws.send(JSON.stringify({
+                    base_id: CONFIG.baseId,
+                    yyyymm: CONFIG.yyyymm,
+                    switch: CONFIG.switch,
+                    start_hour: CONFIG.startHour,
+                    end_hour: CONFIG.endHour
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const response = JSON.parse(event.data);
+
+                    if (response.status === 'progress') {
+                        progressBar.style.width = response.progress + '%';
+                        progressText.textContent = response.progress + '%';
+                        if (response.log) appendLog(response.log);
+                    } 
+                    else if (response.status === 'complete') {
+                        appendLog("🎉 全ポートの解析データを受信しました。テーブルをレンダリングします。");
+                        
+                        const tbody = document.getElementById('report-tbody');
+                        tbody.innerHTML = "";
+                        
+                        const year = parseInt(CONFIG.yyyymm.substring(0, 4));
+                        const month = parseInt(CONFIG.yyyymm.substring(4, 6));
+                        const lastDay = new Date(year, month, 0).getDate();
+                        
+                        const start_dd = `${year}-${String(month).padStart(2, '0')}-01`;
+                        const end_dd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+                        if (!response.data || response.data.length === 0) {
+                            tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:red; padding:20px;">有効なデータをもつポートが見つかりませんでした。</td></tr>`;
+                        } else {
+                            response.data.forEach(row => {
+                                const tr = document.createElement('tr');
+                                
+                                const timeStyle = row.over_80_time !== "0分" 
+                                    ? 'style="color: #cc0000; font-weight: 700; text-align: center; background-color: #fff0f0;"' 
+                                    : 'style="text-align: center; color: #495057;"';
+                                
+                                const burstStyle = (row.burst_count_30m || 0) > 0 
+                                    ? 'style="color: #b15b00; font-weight: 700; text-align: center; background-color: #fffaf0;"' 
+                                    : 'style="text-align: center; color: #6c757d;"';
+                                    
+                                const deadStyle = (row.dead_count_30m || 0) > 0 
+                                    ? 'style="color: #0056b3; font-weight: 700; text-align: center; background-color: #f0f5ff;"' 
+                                    : 'style="text-align: center; color: #6c757d;"';
+
+                                const maxIn = typeof row.max_in === 'number' ? row.max_in.toFixed(2) : '0.00';
+                                const maxOut = typeof row.max_out === 'number' ? row.max_out.toFixed(2) : '0.00';
+                                const avgIn = typeof row.avg_in === 'number' ? row.avg_in.toFixed(2) : '0.00';
+                                const avgOut = typeof row.avg_out === 'number' ? row.avg_out.toFixed(2) : '0.00';
+                                const totalIn = typeof row.total_in_gb === 'number' ? row.total_in_gb.toFixed(2) : '0.00';
+                                const totalOut = typeof row.total_out_gb === 'number' ? row.total_out_gb.toFixed(2) : '0.00';
+
+                                // 💡 核心修正: `CONFIG.CONFIG.yyyymm` などの不正な識別子を `CONFIG.yyyymm` へ完全にクリーン修正
+                                tr.innerHTML = `
+                                    <td><strong>${row.port_name}</strong></td>
+                                    <td style="color:#495057; font-size:13px;">${row.desc || ''}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxOut}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxIn === maxOut ? avgIn : avgIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgOut}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalIn}</td>
+                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalOut}</td>
+                                    <td ${timeStyle}>${row.over_80_time || '0分'}</td>
+                                    <td ${burstStyle}>${row.burst_count_30m || 0} 回</td>
+                                    <td ${deadStyle}>${row.dead_count_30m || 0} 回</td>
+                                    <td style="text-align: center;">
+                                        <a href="/plot?base_id=${CONFIG.baseId}&mode=range&start_dd=${start_dd}&end_dd=${end_dd}&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}&cols=1" class="btn-sm-custom" target="_blank">表示</a>
+                                    </td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        }
+                        
+                        document.getElementById('loading-screen').classList.add('hidden');
+                        document.getElementById('report-screen').classList.remove('hidden');
+                        ws.close();
+                    } 
+                    else if (response.status === 'error') {
+                        appendLog("❌ サーバーエラー: " + response.message);
+                        ws.close();
+                    }
+                } catch (err) {
+                    appendLog("❌ JS描画エラー: " + err.message);
+                }
+            };
+
+            ws.onerror = () => appendLog("❌ WebSocket通信エラーが発生しました。");
+            ws.onclose = () => appendLog("🔌 セッションがクローズされました。");
+        });
+    </script>
+</body>
+</html>

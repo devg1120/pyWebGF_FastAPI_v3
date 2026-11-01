@@ -2564,8 +2564,95 @@ async def ws_traffic_report_monthly(websocket: WebSocket):
             await websocket.send_json({"status": "error", "message": f"スイッチデータが見つかりません。({switch})"})
             return
 
-        # 同期用データ処理関数（1ポート分のPandas集計 - 安全キャスト＆80%超のべ時間算出）
+        # 同期用データ処理関数（1ポート分のPandas集計 - バースト・無通信回数カウント付き）
         def process_port(fname, paths):
+            try:
+                df_list = []
+                for p in paths:
+                    try:
+                        _df = pd.read_csv(p, engine="c")
+                        if not _df.empty: df_list.append(_df)
+                    except: continue
+                if not df_list: return None
+
+                df = pd.concat(df_list, ignore_index=True)
+                if len(df.columns) >= 6:
+                    df.columns = ["日時", "INDEX", "NAME", "STATUS", "項目A", "項目B"] + list(df.columns[6:])
+                elif len(df.columns) >= 3:
+                    df.columns = ["日時", "項目A", "項目B"] + list(df.columns[3:])
+
+                df["日時"] = pd.to_datetime(df["日時"], format="mixed", errors="coerce")
+                df = df.dropna(subset=["日時"]).sort_values("日時").reset_index(drop=True)
+                df_filtered = df[(df["日時"].dt.hour >= start_hour) & (df["日時"].dt.hour <= end_hour)].copy()
+                if df_filtered.empty: return None
+
+                time_diff_sec = df_filtered["日時"].diff().dt.total_seconds()
+                is_missing = (time_diff_sec > 330) | (time_diff_sec < 0)
+                df_filtered["差分A"] = df_filtered["項目A"].diff().clip(lower=0)
+                df_filtered.loc[is_missing, "差分A"] = None
+                df_filtered["bps_A"] = (df_filtered["差分A"] * 8) / 300
+
+                if "項目B" in df_filtered.columns:
+                    df_filtered["差分B"] = df_filtered["項目B"].diff().clip(lower=0)
+                    df_filtered.loc[is_missing, "差分B"] = None
+                    df_filtered["bps_B"] = (df_filtered["差分B"] * 8) / 300
+                else:
+                    df_filtered["bps_B"] = 0
+
+                # ─── 📊 帯域使用率80%超 のべ時間算出 ───
+                over_80_mask = (df_filtered["bps_A"] > 800000000) | (df_filtered["bps_B"] > 800000000)
+                over_80_points = int(over_80_mask.sum())
+                over_80_minutes = over_80_points * 5
+
+                if over_80_minutes >= 60:
+                    over_80_time_str = f"{over_80_minutes // 60}時間{over_80_minutes % 60}分"
+                elif over_80_minutes > 0:
+                    over_80_time_str = f"{over_80_minutes}分"
+                else:
+                    over_80_time_str = "0分"
+
+                # ─── 🧠 💡【新機能】30分超の連続バースト / 無通信回数のカウント ───
+                # 無通信（In/Outともに10kbps未満）のマスクを作成
+                dead_zone_mask = (df_filtered["bps_A"] < 10000) & (df_filtered["bps_B"] < 10000)
+
+                # 連続要素のアイランド（グループID）を算出するロジック
+                # 隣り合う行で状態が変わったタイミングをトリガーに累計和をとる
+                burst_groups = (over_80_mask != over_80_mask.shift()).cumsum()
+                dead_groups = (dead_zone_mask != dead_zone_mask.shift()).cumsum()
+
+                # 30分超 ＝ 5分×7点以上 連続しているグループを抽出してカウント
+                burst_counts = 0
+                dead_counts = 0
+
+                if over_80_points > 0:
+                    # True（バースト状態）かつサイズが7以上のグループ数をカウント
+                    burst_counts = int(df_filtered[over_80_mask].groupby(burst_groups).size().gt(6).sum())
+
+                if dead_zone_mask.any():
+                    # True（無通信状態）かつサイズが7以上のグループ数をカウント
+                    dead_counts = int(df_filtered[dead_zone_mask].groupby(dead_groups).size().gt(6).sum())
+                # ──────────────────────────────────────────────────────────────────
+
+                return {
+                    "port_name": str(fname.replace(".csv", "")),
+                    "filename": str(fname),
+                    "max_in": float(df_filtered["bps_A"].max() or 0.0) / 1_000_000,
+                    "max_out": float(df_filtered["bps_B"].max() or 0.0) / 1_000_000,
+                    "avg_in": float(df_filtered["bps_A"].mean() or 0.0) / 1_000_000,
+                    "avg_out": float(df_filtered["bps_B"].mean() or 0.0) / 1_000_000,
+                    "total_in_gb": float(df_filtered["差分A"].sum() or 0.0) / (1024 * 1024 * 1024),
+                    "total_out_gb": float(df_filtered["差分B"].sum() or 0.0) / (1024 * 1024 * 1024),
+                    "over_80_time": over_80_time_str,
+                    "burst_count_30m": burst_counts,  # 👈 フロント受渡用
+                    "dead_count_30m": dead_counts,    # 👈 フロント受渡用
+                    "desc": str(info_dic.get(fname.replace(".csv", ""), {}).get("desc", "") if isinstance(info_dic.get(fname.replace(".csv", "")), dict) else info_dic.get(fname.replace(".csv", ""), ""))
+                }
+            except Exception as e:
+                print(f"❌ ポート {fname} の解析中にエラーが発生したためスキップします: {e}")
+                return None
+
+        # 同期用データ処理関数（1ポート分のPandas集計 - 安全キャスト＆80%超のべ時間算出）
+        def process_port__(fname, paths):
             try:
                 df_list = []
                 for p in paths:

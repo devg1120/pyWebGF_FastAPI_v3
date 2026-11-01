@@ -25,6 +25,9 @@
         
         h2 { font-size: 1.75rem; margin-bottom: .5rem; font-weight: 500; line-height: 1.2; color: #343a40; }
         .text-muted { color: #6c757d!important; font-size: 13px; }
+        .btn-reset-custom { display: inline-block; font-weight: 500; color: #6c757d; text-align: center; vertical-align: middle; background-color: #fff; border: 1px solid #6c757d; padding: .25rem .5rem; font-size: .85rem; line-height: 1.5; border-radius: .2rem; cursor: pointer; transition: all 0.15s ease-in-out; }
+        .btn-reset-custom:hover { color: #fff; background-color: #6c757d; }
+
     </style>
 </head>
 <body>
@@ -42,12 +45,25 @@
         <!-- 📅 元デザインの1カラムレポート結果画面 -->
         <div id="report-screen" class="hidden">
             <h2>📅 月間トラフィック analysis レポート2</h2>
+
+            <!-- 💡 ボタンを配置するコントロールバーを新設 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <p style="font-size: 15px; margin: 0;">
+                    対象機器: <strong style="color:#007bff;">{{ switch }}</strong> | 
+                    対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong> | 
+                    集計時間帯: <span style="background:#e9ecef; padding:2px 6px; border-radius:4px;">{{ start_hour }}:00 ～ {{ end_hour }}:55</span>
+                </p>
+                <!-- 💡 ソートリセットボタンの実装 -->
+                <button onclick="resetSort()" class="btn-reset-custom" id="btn-reset" style="display: none;">↩️ 並び替えをリセット</button>
+            </div>
+	    <!--
             <p style="font-size: 15px; margin-bottom: 20px;">
                 対象機器: <strong style="color:#007bff;">{{ switch }}</strong> | 
                 対象月: <strong>{{ yyyymm[:4] }}年{{ yyyymm[4:] }}月期</strong> | 
                 集計時間帯: <span style="background:#e9ecef; padding:2px 6px; border-radius:4px;">{{ start_hour }}:00 ～ {{ end_hour }}:55</span>
             </p>
-            
+	    -->
+
             <table>
                 <thead>
                     <tr>
@@ -57,6 +73,9 @@
                         <th colspan="2">平均通信速度 (Mbps)</th>
                         <th colspan="2">総転送量 (GB)</th>
                         <th rowspan="2" style="background-color: #fff0f0; color: #cc0000; width: 140px;">⚠️ 80%超のべ時間</th>
+                        <th rowspan="2" style="background-color: #fffaf0; color: #b15b00; width: 110px;">🔥 バースト回数<br><small>(30分超)</small></th>
+                        <th rowspan="2" style="background-color: #f0f5ff; color: #0056b3; width: 110px;">💤 無通信回数<br><small>(30分超)</small></th>
+
                         <th rowspan="2" style="width: 80px;">詳細</th>
                     </tr>
                     <tr>
@@ -64,8 +83,12 @@
                         <th style="width: 85px;">Out</th>
                         <th style="width: 85px;">In</th>
                         <th style="width: 85px;">Out</th>
-                        <th style="width: 100px;">Inbound</th>
-                        <th style="width: 100px;">Outbound</th>
+                        <th style="width: 110px; cursor: pointer; user-select: none; background-color: #e2e6ea;" id="th-sort-in" onclick="toggleSort('total_in_gb')">
+                            Inbound <span id="sort-icon-in">↕️</span>
+                        </th>
+                        <th style="width: 110px; cursor: pointer; user-select: none; background-color: #e2e6ea;" id="th-sort-out" onclick="toggleSort('total_out_gb')">
+                            Outbound <span id="sort-icon-out">↕️</span>
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="report-tbody"></tbody>
@@ -73,7 +96,7 @@
             <p class="text-muted" style="margin-top: 15px;">※ 欠損値（330秒以上のデータギャップ）は集計の計算対象から除外されています。</p>
         </div>
     </div>
-    <script>
+   <script>
         const CONFIG = {
             baseId: "{{ base_id }}",
             yyyymm: "{{ yyyymm }}",
@@ -81,6 +104,12 @@
             startHour: parseInt("{{ start_hour }}") || 8,
             endHour: parseInt("{{ end_hour }}") || 18
         };
+
+        // 💡 ソート用の状態管理変数
+        let cachedData = [];     // 画面でソート操作するための動的配列
+        let originalData = [];   // 💡 サーバーから届いた初期順序（ポート名順）を永久に保持するバックアップ配列
+        let currentSortKey = ""; // 現在ソート中のキー
+        let isAscending = true;  // 昇順（true）か降順（false）か
 
         window.addEventListener('DOMContentLoaded', () => {
             const logArea = document.getElementById('log-area');
@@ -124,51 +153,14 @@
                     else if (response.status === 'complete') {
                         appendLog("🎉 全ポートの解析データを受信しました。テーブルをレンダリングします。");
                         
-                        const tbody = document.getElementById('report-tbody');
-                        tbody.innerHTML = "";
+                        // 💡 届いたデータをキャッシュ用の配列に格納
+                        cachedData = response.data || [];
                         
-                        // 💡 該当月の1日から月末日（末日自動計算）までの期間指定パラメータを生成
-                        const year = parseInt(CONFIG.yyyymm.substring(0, 4));
-                        const month = parseInt(CONFIG.yyyymm.substring(4, 6));
-                        const lastDay = new Date(year, month, 0).getDate(); // JavaScriptで月末日を取得
+                        // 💡 初期状態（ポート名の並び順）のディープコピーを不変オブジェクトとして完全記憶
+                        originalData = JSON.parse(JSON.stringify(cachedData));
                         
-                        const start_dd = `${year}-${String(month).padStart(2, '0')}-01`;
-                        const end_dd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-                        if (!response.data || response.data.length === 0) {
-                            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:red; padding:20px;">有効なデータをもつポートが見つかりませんでした。</td></tr>`;
-                        } else {
-                            response.data.forEach(row => {
-                                const tr = document.createElement('tr');
-                                
-                                const timeStyle = row.over_80_time !== "0分" 
-                                    ? 'style="color: #cc0000; font-weight: 700; text-align: center; background-color: #fff0f0;"' 
-                                    : 'style="text-align: center; color: #495057;"';
-                                
-                                const maxIn = typeof row.max_in === 'number' ? row.max_in.toFixed(2) : '0.00';
-                                const maxOut = typeof row.max_out === 'number' ? row.max_out.toFixed(2) : '0.00';
-                                const avgIn = typeof row.avg_in === 'number' ? row.avg_in.toFixed(2) : '0.00';
-                                const avgOut = typeof row.avg_out === 'number' ? row.avg_out.toFixed(2) : '0.00';
-                                const totalIn = typeof row.total_in_gb === 'number' ? row.total_in_gb.toFixed(2) : '0.00';
-                                const totalOut = typeof row.total_out_gb === 'number' ? row.total_out_gb.toFixed(2) : '0.00';
-
-                                tr.innerHTML = `
-                                    <td><strong>${row.port_name}</strong></td>
-                                    <td style="color:#495057; font-size:13px;">${row.desc || ''}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxIn}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxOut}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgIn}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgOut}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalIn}</td>
-                                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${totalOut}</td>
-                                    <td ${timeStyle}>${row.over_80_time || '0分'}</td>
-                                    <td style="text-align: center;">
-                                        <a href="/plot?base_id=${CONFIG.baseId}&mode=range&start_dd=${start_dd}&end_dd=${end_dd}&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}&cols=1" class="btn-sm-custom" target="_blank">表示</a>
-                                    </td>
-                                `;
-                                tbody.appendChild(tr);
-                            });
-                        }
+                        // 初回レンダリング
+                        renderTable(cachedData);
                         
                         document.getElementById('loading-screen').classList.add('hidden');
                         document.getElementById('report-screen').classList.remove('hidden');
@@ -186,6 +178,108 @@
             ws.onerror = () => appendLog("❌ WebSocket通信エラーが発生しました。");
             ws.onclose = () => appendLog("🔌 セッションがクローズされました。");
         });
+
+        // データを画面のテーブル（HTML）に流し込む関数
+        function renderTable(dataList) {
+            const tbody = document.getElementById('report-tbody');
+            tbody.innerHTML = "";
+            
+            const year = parseInt(CONFIG.yyyymm.substring(0, 4));
+            const month = parseInt(CONFIG.yyyymm.substring(4, 6));
+            const lastDay = new Date(year, month, 0).getDate();
+            
+            const start_dd = `${year}-${String(month).padStart(2, '0')}-01`;
+            const end_dd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+            if (dataList.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:red; padding:20px;">有効なデータをもつポートが見つかりませんでした。</td></tr>`;
+                return;
+            }
+
+            dataList.forEach(row => {
+                const tr = document.createElement('tr');
+                
+                const timeStyle = row.over_80_time !== "0分" 
+                    ? 'style="color: #cc0000; font-weight: 700; text-align: center; background-color: #fff0f0;"' 
+                    : 'style="text-align: center; color: #495057;"';
+                
+                const burstStyle = (row.burst_count_30m || 0) > 0 
+                    ? 'style="color: #b15b00; font-weight: 700; text-align: center; background-color: #fffaf0;"' 
+                    : 'style="text-align: center; color: #6c757d;"';
+                    
+                const deadStyle = (row.dead_count_30m || 0) > 0 
+                    ? 'style="color: #0056b3; font-weight: 700; text-align: center; background-color: #f0f5ff;"' 
+                    : 'style="text-align: center; color: #6c757d;"';
+
+                const maxIn = typeof row.max_in === 'number' ? row.max_in.toFixed(2) : '0.00';
+                const maxOut = typeof row.max_out === 'number' ? row.max_out.toFixed(2) : '0.00';
+                const avgIn = typeof row.avg_in === 'number' ? row.avg_in.toFixed(2) : '0.00';
+                const avgOut = typeof row.avg_out === 'number' ? row.avg_out.toFixed(2) : '0.00';
+                const totalIn = typeof row.total_in_gb === 'number' ? row.total_in_gb.toFixed(2) : '0.00';
+                const totalOut = typeof row.total_out_gb === 'number' ? row.total_out_gb.toFixed(2) : '0.00';
+
+                tr.innerHTML = `
+                    <td><strong>${row.port_name}</strong></td>
+                    <td style="color:#495057; font-size:13px;">${row.desc || ''}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxIn}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${maxOut}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgIn}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums;">${avgOut}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums; ${currentSortKey === 'total_in_gb' ? 'background-color:#f1f3f5;' : ''}">${totalIn}</td>
+                    <td style="text-align: right; font-variant-numeric: tabular-nums; ${currentSortKey === 'total_out_gb' ? 'background-color:#f1f3f5;' : ''}">${totalOut}</td>
+                    <td ${timeStyle}>${row.over_80_time || '0分'}</td>
+                    <td ${burstStyle}>${row.burst_count_30m || 0} 回</td>
+                    <td ${deadStyle}>${row.dead_count_30m || 0} 回</td>
+                    <td style="text-align: center;">
+                        <a href="/plot?base_id=${CONFIG.baseId}&mode=range&start_dd=${start_dd}&end_dd=${end_dd}&switch=${CONFIG.switch}&filename=${row.filename}&start_hour=${CONFIG.startHour}&end_hour=${CONFIG.endHour}&cols=1" class="btn-sm-custom" target="_blank">表示</a>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ヘッダーがクリックされた時に呼び出される高速ソート制御関数
+        function toggleSort(key) {
+            if (currentSortKey === key) {
+                isAscending = !isAscending;
+            } else {
+                currentSortKey = key;
+                isAscending = false;
+            }
+
+            cachedData.sort((a, b) => {
+                const valA = a[key] || 0;
+                const valB = b[key] || 0;
+                return isAscending ? valA - valB : valB - valA;
+            });
+
+            document.getElementById("sort-icon-in").textContent = currentSortKey === "total_in_gb" ? (isAscending ? "🔼" : "🔽") : "↕️";
+            document.getElementById("sort-icon-out").textContent = currentSortKey === "total_out_gb" ? (isAscending ? "🔼" : "🔽") : "↕️";
+
+            // 💡 ソートが実行されたら、リセットボタン（↩️）を画面上にフワッと出現させる
+            document.getElementById("btn-reset").style.display = "inline-block";
+
+            renderTable(cachedData);
+        }
+
+        // 💡 【新設】並び替え状態を初期のポート名順へ瞬間復元するリセット関数
+        function resetSort() {
+            // 現在のソートキーとアイコン状態を完全クリア
+            currentSortKey = "";
+            isAscending = true;
+            document.getElementById("sort-icon-in").textContent = "↕️";
+            document.getElementById("sort-icon-out").textContent = "↕️";
+            
+            // 💡 バックアップしておいた初期配列（originalData）をキャッシュに再ロード
+            cachedData = JSON.parse(JSON.stringify(originalData));
+            
+            // リセットボタン自体を再び非表示にする
+            document.getElementById("btn-reset").style.display = "none";
+            
+            // 初期状態のテーブルを瞬間再描画
+            renderTable(cachedData);
+        }
+
     </script>
 </body>
 </html>
