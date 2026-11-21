@@ -2190,6 +2190,7 @@ async def timeseries_board5(
         context={
             "base_ids": list(BASE_DIRS.keys()),
             "selected_base_id": base_id,
+            "registry": DASHBOARD_REGISTRY,
             "actual_base_dir": actual_base,
             "date_tree": date_tree,
             "available_switches": available_switches,

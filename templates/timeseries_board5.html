@@ -52,6 +52,7 @@
             <label>対象スイッチ名:</label>
             <input type="text" name="switch" value="{{ selected_switch or 'switch1' }}" placeholder="例: switch1" required>
 -->
+                <!--
                 <input type="hidden" name="base_id" value="{{ selected_base_id }}">
                 <label for="switch_select">対象スイッチ名:</label>
                 <select name="switch" id="switch_select" onchange="this.form.submit()">
@@ -64,7 +65,6 @@
                         <option value="{{ sw }}" {% if sw == selected_switch %}selected{% endif %}>{{ sw }}</option>
                     {% endfor %}
                 </select>
-                <!-- ポート（ファイル）選択プルダウン -->
                 <div class="form-group" style="display:inline-block; margin-right:10px;">
                     <label for="filename">ポート選択:</label>
                     <select name="filename"
@@ -84,6 +84,7 @@
     登録
 </button>
 
+-->
                 <label>開始日:</label>
                 <input type="date" name="start_dd" value="{{ selected_start_dd }}" required>
                 <label>終了日:</label>
@@ -130,6 +131,7 @@
         {% set port_list = ["portA","portB", "portC", "portD"] %}
         {% set port_list = ["portA","portB", "portC", "portD","portE", "portF"] %}
         {% set port_list = ["portA","portB", "portC", "portD"] %}
+        {% set port_list = ["portA","portB", "portC", ] %}
         <!-- timeseries_board.html のグラフ表示領域のイメージ -->
         <!-- 💡 日数分の1日グラフをタイル並びにするセクション -->
         {% if selected_filename and target_days %}
@@ -144,13 +146,17 @@
                             flex-wrap: wrap;
                             gap: 15px;
                             margin-top: 15px">
-              {% for port in port_list %}
+              {# for port in port_list #}
+	      {% for item in registry %}
                 <div class="graph-grid"
                              style="flex: 1 1 calc(10% - 15px);
                             flex-wrap: wrap;
                             gap: 15px;
                             margin-top: 15px">
+			<!--
 			<span>{{port}}</span>
+			-->
+			<span>{{item.filename}}</span>
                     {% for day in target_days %}
                         <div class="graph-card"
                              style="flex: 1 1 calc(100% - 15px);
@@ -178,6 +184,7 @@
 					    ;" >{{day.weekdays_jp}}</span>)     &ensp;&ensp;{{ start_hour }}:00 ～ {{ end_hour }}:00 
                             </div>
                             <!-- mode="single" に固定し、日付パラメータをループ変数（day.yyyymm / day.dd）に差し替え -->
+<!--
                             <img src="/plot?base_id={{ selected_base_id }}
 				 &mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd }}&switch={{ selected_switch }}&filename={{ selected_filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ info_dic.get(selected_filename, '') }}"
                                  alt="{{ day.formatted }} グラフ"
@@ -185,6 +192,26 @@
                                         height: auto;
                                         display: block"
                                  loading="lazy">
+-->
+                            <img src="/plot?base_id={{ item.base_id }}
+				 &mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd }}&switch={{ item.switch }}&filename={{ item.filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ info_dic.get(item.filename, '') }}"
+                                 alt="{{ day.formatted }} グラフ"
+                                 style="width: 100%;
+                                        height: auto;
+                                        display: block"
+                                 loading="lazy">
+<!--
+                            <img class="dashboard-chart-img"
+                                 data-base-id="{{ item.base_id or 'default' }}"
+                                 data-switch="{{ item.switch }}"
+                                 data-filename="{{ item.filename }}"
+                                 data-desc="{{ item.desc or '' }}"
+                                 src=""
+                                 alt="グラフ読み込み中..."
+                                 style="width: 100%;
+                                        height: auto;
+                                        display: block">
+-->
                         </div>
                     {% endfor %}
                 </div>
