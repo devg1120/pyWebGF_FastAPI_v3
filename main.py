@@ -219,9 +219,231 @@ async def index(
         },
     )
 
+import polars as pl
 
 @app.get("/plot")
-async def plot_graph(
+async def plot_graph__polars(
+    base_id: Optional[str] = None,
+    mode: str = "single",
+    yyyymm: Optional[str] = None,
+    dd: Optional[str] = None,
+    switch: Optional[str] = None,
+    filename: Optional[str] = None,
+    cols: int = 2,
+    start_hour: int = 8,
+    end_hour: int = 18,
+    desc: str = "",
+    speed: str = "",
+    start_dd: str = "",
+    end_dd: str = "",
+):
+    actual_base = get_base_dir_path(base_id)
+
+    fig_size = (14, 4.0) if cols == 1 else (6, 2.8) if cols == 4 else (8, 3.0)
+    fig = Figure(figsize=fig_size)
+    ax = fig.subplots()
+
+    g_speed = f"{int(speed) // 1000}Gbps" if speed != "" else ""
+
+    try:
+        target_files = []
+
+        # ─── 1. 対象ファイルパスの収集（I/Oはまだ行わない） ───
+        if mode == "range" and start_dd and end_dd:
+            start_date_obj = pd.to_datetime(start_dd.replace("/", "-"))
+            end_date_obj = pd.to_datetime(end_dd.replace("/", "-"))
+            dr = pd.date_range(start=start_date_obj, end=end_date_obj)
+
+            for d in dr:
+                ym_dir = d.strftime("%Y%m")
+                d_single = str(d.day)
+                d_double = d.strftime("%d")
+                candidate_paths = [
+                    os.path.join(actual_base, ym_dir, d_double, switch, filename),
+                    os.path.join(actual_base, ym_dir, d_single, switch, filename),
+                    os.path.join(actual_base, ym_dir, d_double, switch.upper(), filename),
+                    os.path.join(actual_base, ym_dir, d_single, switch.upper(), filename),
+                ]
+                for c_path in candidate_paths:
+                    if os.path.exists(c_path):
+                        target_files.append(c_path)
+                        break
+
+            if not target_files:
+                raise FileNotFoundError("データファイルが見つかりません。")
+
+            start_time = start_date_obj + pd.Timedelta(hours=start_hour)
+            end_time = end_date_obj + pd.Timedelta(hours=end_hour, minutes=55)
+            x_label_text = f"{start_date_obj.strftime('%Y-%m-%d')} ～ {end_date_obj.strftime('%Y-%m-%d')}"
+            x_tick_format = "%m/%d %H:%M"
+
+        else:
+            file_path = os.path.join(actual_base, yyyymm, dd, switch, filename)
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"ファイルなし: {yyyymm}/{dd}")
+            target_files.append(file_path)
+
+            base_date = pd.to_datetime(f"{yyyymm[:4]}-{yyyymm[4:]}-{dd}").normalize()
+            start_time = base_date + pd.Timedelta(hours=start_hour)
+            end_time = base_date + pd.Timedelta(hours=end_hour, minutes=55)
+            x_label_text = f"{yyyymm[:4]}-{yyyymm[4:6]}-{dd}"
+            x_tick_format = "%H:%M"
+
+        # ─── 2. 【Polars化】CSV一括読み込み・パース・bps計算をRust並列処理 ───
+        def load_and_process_with_polars(files, s_time, e_time):
+            dfs = []
+            for f in files:
+                try:
+                    # PolarsのRust製CSVリーダーで高速読み込み
+                    _df = pl.read_csv(f, ignore_errors=True)
+                    if _df.is_empty():
+                        continue
+                    # 列数に応じて必要な列だけ抽出・リネーム（メモリ節約）
+                    if _df.width >= 6:
+                        _df = _df.select([
+                            pl.col(_df.columns[0]).alias("日時"),
+                            pl.col(_df.columns[4]).cast(pl.Float64, strict=False).alias("項目A"),
+                            pl.col(_df.columns[5]).cast(pl.Float64, strict=False).alias("項目B"),
+                        ])
+                    elif _df.width >= 3:
+                        _df = _df.select([
+                            pl.col(_df.columns[0]).alias("日時"),
+                            pl.col(_df.columns[1]).cast(pl.Float64, strict=False).alias("項目A"),
+                            pl.col(_df.columns[2]).cast(pl.Float64, strict=False).alias("項目B"),
+                        ])
+                    else:
+                        continue
+                    dfs.append(_df)
+                except Exception:
+                    continue
+
+            if not dfs:
+                return pl.DataFrame()
+
+            # 全日分を一気に結合
+            df = pl.concat(dfs)
+
+            # 日時パース・ソート・ギャップガード・bps計算をベクトル演算で一括実行
+            df = (
+                df.with_columns(
+                    pl.col("日時").str.to_datetime(strict=False)
+                )
+                .drop_nulls(subset=["日時"])
+                .sort("日時")
+                .with_columns(
+                    (pl.col("日時").diff().dt.total_seconds()).alias("diff_sec")
+                )
+                .with_columns([
+                    pl.when((pl.col("diff_sec") > 330) | (pl.col("diff_sec") < 0))
+                    .then(None)
+                    .otherwise((pl.col("項目A").diff().clip(lower_bound=0) * 8) / 300)
+                    .alias("bps_A"),
+
+                    pl.when((pl.col("diff_sec") > 330) | (pl.col("diff_sec") < 0))
+                    .then(None)
+                    .otherwise((pl.col("項目B").diff().clip(lower_bound=0) * 8) / 300)
+                    .alias("bps_B"),
+                ])
+                # 指定時間帯でフィルタリング
+                .filter((pl.col("日時") >= s_time) & (pl.col("日時") <= e_time))
+            )
+
+            # 点数が多すぎる場合は間引き（描画負荷の軽減）
+            if df.height > 1000:
+                step = df.height // 1000
+                df = df.gather_every(step)
+
+            return df
+
+        # スレッドプールでPolars処理を実行
+        df_filtered = await run_in_threadpool(
+            load_and_process_with_polars, target_files, start_time, end_time
+        )
+
+        fig.set_facecolor("#f0f0f0")
+        ax.set_facecolor("#ffffff")
+
+        # ─── 3. 描画（PolarsのSeriesをそのままMatplotlibに渡す） ───
+        if not df_filtered.is_empty():
+            x_dates = df_filtered["日時"].to_list()
+            bps_a = df_filtered["bps_A"].to_numpy()
+            bps_b = df_filtered["bps_B"].to_numpy()
+
+            ax.fill_between(x_dates, bps_a, color="#00eb0c", alpha=0.9, label="In (bps)")
+            ax.plot(x_dates, bps_a, color="#006600", linewidth=0.8)
+            ax.plot(x_dates, bps_b, color="#1000ff", linewidth=1.8, label="Out (bps)")
+
+            max_a = df_filtered["bps_A"].max() or 0
+            max_b = df_filtered["bps_B"].max() or 0
+            max_val = max(max_a, max_b)
+        else:
+            ax.text(0.5, 0.5, "データがありません", ha="center", va="center", color="red")
+            max_val = 0
+
+        ax.grid(True, which="both", color="#cccccc", linestyle="-", linewidth=0.5)
+        ax.set_xlim(start_time, end_time)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter(x_tick_format))
+        if mode == "range":
+            for label in ax.get_xticklabels():
+                label.set_rotation(30)
+                label.set_horizontalalignment("right")
+
+        # Y軸フォーマット（既存ロジックと同じ）
+        if max_val >= 2_000_000_000:
+            ax.set_ylim(0, 10_000_000_000)
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000_000:,.1f} G")
+            )
+            ax.set_ylabel("転送速度 (Gbps)")
+            ax.tick_params(axis="y", colors="red")
+        elif max_val >= 1_000_000_000:
+            ax.set_ylim(0, 2_000_000_000)
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000_000:,.1f} G")
+            )
+            ax.set_ylabel("転送速度 (Gbps)")
+            ax.tick_params(axis="y", colors="#0080FF")
+        else:
+            ax.set_ylim(0, 1_000_000_000)
+            ax.get_yaxis().set_major_formatter(
+                matplotlib.ticker.FuncFormatter(lambda x, p: f"{x / 1_000_000:,.0f} M")
+            )
+            ax.set_ylabel("転送速度 (Mbps)")
+
+        ax.get_yaxis().get_offset_text().set_visible(False)
+        ax.set_title(
+            f"[{base_id}] {switch}: {filename.replace('.csv', '')}  {g_speed}",
+            fontsize=11,
+            loc="left",
+        )
+        ax.set_title(desc, fontsize=10, loc="right", color="#000000")
+        ax.set_xlabel(x_label_text)
+
+    except Exception as e:
+        traceback.print_exc()
+        ax.text(0.5, 0.5, f"Error: {type(e).__name__}", ha="center", va="center", color="red")
+
+    fig.legend(
+        bbox_to_anchor=(0.13, -0.09),
+        loc="lower left",
+        ncol=2,
+        frameon=True,
+        facecolor="#ffffff",
+        edgecolor="#cccccc",
+    )
+    # ─── 4. 高速化ポイント：bbox_inches="tight" を外し余白を固定 ───
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.86, bottom=0.28)
+
+    img = io.BytesIO()
+    await run_in_threadpool(fig.savefig, img, format="png", dpi=100)
+    img.seek(0)
+    fig.clear()
+    return StreamingResponse(img, media_type="image/png")
+
+
+#pandas
+@app.get("/plot__")
+async def plot_graph__pndas(
     base_id: Optional[str] = None,  # 💡 クエリパラメータを追加
     mode: str = "single",
     yyyymm: Optional[str] = None,
@@ -492,10 +714,15 @@ async def plot_graph(
     plt.subplots_adjust(bottom=0.25)
     fig.tight_layout()
 
+    #img = io.BytesIO()
+    #await run_in_threadpool(
+    #    fig.savefig, img, format="png", bbox_inches="tight", dpi=120
+    #)
+
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.86, bottom=0.28)
     img = io.BytesIO()
-    await run_in_threadpool(
-        fig.savefig, img, format="png", bbox_inches="tight", dpi=120
-    )
+    await run_in_threadpool(fig.savefig, img, format="png", dpi=100)  
+
     img.seek(0)
     fig.clear()
     return StreamingResponse(img, media_type="image/png")
