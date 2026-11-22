@@ -312,10 +312,17 @@
                         </div>
 
                         {# 💡 核心修正：既存の /plot 側の `if mode == "range" and start_dd and end_dd:` 条件を100%着火させるため、各タイムスケール行の期間値をインジェクション #}
-                        <div class="graph-container" style="text-align: center; background-color: #fcfcfc; padding: 5px; border-radius: 2px;">
-                            <img src="/plot?base_id={{ selected_base_id }}&mode=range&start_dd={{ day.start_dd }}&end_dd={{ day.end_dd }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols={{ col_count }}" 
+                        <div class="graph-container graph-card" style="text-align: center; background-color: #fcfcfc; padding: 5px; border-radius: 2px;">
+                            <img class="monitor-chart" src="/plot?base_id={{ selected_base_id }}&mode=range&start_dd={{ day.start_dd }}&end_dd={{ day.end_dd }}&switch={{ target.switch }}&filename={{ target.filename }}&start_hour={{ start_hour }}&end_hour={{ end_hour }}&cols={{ col_count }}" 
                                  alt="トラフィック推移グラフ" 
                                  style="width: 100%; height: auto; max-height: 260px; border-radius: 2px;">
+<button type="button"
+        class="snapshot-btn"
+        style="margin-top:5px; background-color:#28a745; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;"
+        data-interface="{{ target.filename | replace('.csv','') | trim  }}"
+	data-desc="">
+    📸 スナップショット一時保存
+</button>
                         </div>
                     </div>
                 {% endfor %}
@@ -842,6 +849,49 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 
-
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 画面内のすべてのスナップショットボタンに対してクリックイベントを設定
+    document.addEventListener('click', function(event) {
+        // クリックされた要素がスナップショットボタンの場合のみ処理
+        if (event.target && event.target.classList.contains('snapshot-btn')) {
+            const button = event.target;
+            
+            // 💡 魔法のロジック: ボタンから一番近い親の要素(カード)を遡り、その中にある画像タグを直接狙い撃ち
+            const cardElement = button.closest('.graph-card') || button.parentElement;
+            const imgElement = cardElement.querySelector('.monitor-chart');
+            
+            if (!imgElement) {
+                alert('エラー: 連動するグラフ画像が見つかりません。');
+                return;
+            }
+            
+            const interfaceName = button.getAttribute('data-interface');
+            const desc = button.getAttribute('data-desc') || '';
+            const imgSrc = imgElement.src; // 変更後の最新のURL（日付・スイッチ反映後）を動的にキャッチ
+            
+            // LocalStorageへの保存処理
+            let snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
+            
+            // すでに同じグラフURLが登録されているかチェック
+            if (snapshots.some(s => s.imgSrc === imgSrc)) {
+                alert('このグラフは既にスナップショットに登録されています。');
+                return;
+            }
+            
+            // データを配列に追加
+            snapshots.push({
+                interface: interfaceName,
+                desc: desc,
+                imgSrc: imgSrc,
+                timestamp: new Date().toLocaleString()
+            });
+            
+            localStorage.setItem('traffic_snapshots', JSON.stringify(snapshots));
+            alert(`[${interfaceName}] の最新グラフをスナップショットに保存しました！`);
+        }
+    });
+});
+</script>
     </body>
 </html>
