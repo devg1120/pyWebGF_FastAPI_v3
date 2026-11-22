@@ -193,7 +193,7 @@
                                         display: block"
                                  loading="lazy">
 -->
-                            <img src="/plot?base_id={{ item.base_id }}
+                            <img class="monitor-chart" src="/plot?base_id={{ item.base_id }}
 				 &mode=single&yyyymm={{ day.yyyymm }}&dd={{ day.dd }}&switch={{ item.switch }}&filename={{ item.filename }}&cols=2&start_hour={{ start_hour }}&end_hour={{ end_hour }}&desc={{ info_dic.get(item.filename, '') }}"
                                  alt="{{ day.formatted }} グラフ"
                                  style="width: 100%;
@@ -212,6 +212,13 @@
                                         height: auto;
                                         display: block">
 -->
+<button type="button"
+        class="snapshot-btn"
+        style="margin-top:5px; background-color:#28a745; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;"
+        data-interface="{{ item.filename | replace('.csv','') | trim  }}"
+	data-desc="{{info_dic.get(item.filename, '')  }}">
+    📸 スナップショット一時保存
+</button>
                         </div>
                     {% endfor %}
                 </div>
@@ -280,6 +287,49 @@ function handleClick(port_list2) {
     console.log(port_list2.length)
 }
 </script>
-
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 画面内のすべてのスナップショットボタンに対してクリックイベントを設定
+    document.addEventListener('click', function(event) {
+        // クリックされた要素がスナップショットボタンの場合のみ処理
+        if (event.target && event.target.classList.contains('snapshot-btn')) {
+            const button = event.target;
+            
+            // 💡 魔法のロジック: ボタンから一番近い親の要素(カード)を遡り、その中にある画像タグを直接狙い撃ち
+            const cardElement = button.closest('.graph-card') || button.parentElement;
+            const imgElement = cardElement.querySelector('.monitor-chart');
+            
+            if (!imgElement) {
+                alert('エラー: 連動するグラフ画像が見つかりません。');
+                return;
+            }
+            
+            const interfaceName = button.getAttribute('data-interface');
+            const desc = button.getAttribute('data-desc') || '';
+            const imgSrc = imgElement.src; // 変更後の最新のURL（日付・スイッチ反映後）を動的にキャッチ
+            
+            // LocalStorageへの保存処理
+            let snapshots = JSON.parse(localStorage.getItem('traffic_snapshots')) || [];
+            
+            // すでに同じグラフURLが登録されているかチェック
+            if (snapshots.some(s => s.imgSrc === imgSrc)) {
+                alert('このグラフは既にスナップショットに登録されています。');
+                return;
+            }
+            
+            // データを配列に追加
+            snapshots.push({
+                interface: interfaceName,
+                desc: desc,
+                imgSrc: imgSrc,
+                timestamp: new Date().toLocaleString()
+            });
+            
+            localStorage.setItem('traffic_snapshots', JSON.stringify(snapshots));
+            alert(`[${interfaceName}] の最新グラフをスナップショットに保存しました！`);
+        }
+    });
+});
+</script>
     </body>
 </html>
